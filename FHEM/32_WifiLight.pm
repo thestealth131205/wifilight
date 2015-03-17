@@ -1172,7 +1172,7 @@ WifiLight_RGBWLD382A_On(@)
 {
   my ($ledDevice, $ramp) = @_;
   my $delay = 50;
-  my $on = sprintf("%c%c%c", 0x71, 0x23, 0x0F, 0xA3);
+  my $on = sprintf("%c%c%c%c", 0x71, 0x23, 0x0F, 0xA3);
   # my $msg = sprintf("%c%c%c%c%c", 0x56, 0, 0, 0, 0xAA);
   my $receiver;
   WifiLight_LowLevelCmdQueue_Add($ledDevice, $on, $receiver, $delay);
@@ -1241,7 +1241,7 @@ WifiLight_RGBLD382A_On(@)
 {
   my ($ledDevice, $ramp) = @_;
   my $delay = 50;
-  my $on = sprintf("%c%c%c", 0x71, 0x23, 0x0F, 0xA3);
+  my $on = sprintf("%c%c%c%c", 0x71, 0x23, 0x0F, 0xA3);
   # my $msg = sprintf("%c%c%c%c%c", 0x56, 0, 0, 0, 0xAA);
   my $receiver;
   WifiLight_LowLevelCmdQueue_Add($ledDevice, $on, $receiver, $delay);
