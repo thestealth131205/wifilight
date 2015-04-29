@@ -561,7 +561,7 @@ WifiLight_Set(@)
     WifiLight_HighLevelCmdQueue_Clear($ledDevice);
     if (defined($args[0]))
     {
-      return "usage: set $name on [seconds]" if ($args[0] !~ /^\d+$/);
+      return "usage: set $name on [seconds]" if ($args[0] !~ /^\d?.?\d+$/);
       $ramp = $args[0];
     }
     return WifiLight_RGBWLD316_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD316'));
@@ -583,7 +583,7 @@ WifiLight_Set(@)
     WifiLight_HighLevelCmdQueue_Clear($ledDevice);
     if (defined($args[0]))
     {
-      return "usage: set $name off [seconds]" if ($args[0] !~ /^\d+$/);
+      return "usage: set $name off [seconds]" if ($args[0] !~ /^\d?.?\d+$/);
       $ramp = $args[0];
     }
     return WifiLight_RGBWLD316_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD316'));
@@ -646,7 +646,7 @@ WifiLight_Set(@)
     return "usage: set $name dim level [seconds]" if !($args[0] ~~ [0..100]);
     if (defined($args[1]))
     {
-      return "usage: set $name dim level [seconds] [q]" if ($args[1] !~ /^\d+$/);
+      return "usage: set $name dim level [seconds] [q]" if ($args[1] !~ /^\d?.?\d+$/);
       $ramp = $args[1];
     }
     if (defined($args[2]))
@@ -689,7 +689,7 @@ WifiLight_Set(@)
     
     if (defined($args[1]))
     {
-      return "usage: set $name HSV H,S,V seconds flags programm" if ($args[1] !~ /^\d+$/);
+      return "usage: set $name HSV H,S,V seconds flags programm" if ($args[1] !~ /^\d?.?\d+$/);
       $ramp = $args[1];
     }
     if (defined($args[2]))
