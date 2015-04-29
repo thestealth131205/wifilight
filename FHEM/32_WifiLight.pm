@@ -549,11 +549,11 @@ WifiLight_Set(@)
   
   if (($cmd eq 'HSV') || ($cmd eq 'RGB') || ($cmd eq 'dim'))
   {
-    $args[1] = AttrVal($ledDevice->{NAME}, "defaultRamp", 0) if !($args[1]);
+    $args[1] = AttrVal($ledDevice->{NAME}, "defaultRamp", 0) if !defined($args[1]);
   }
   else
   {
-    $args[0] = AttrVal($ledDevice->{NAME}, "defaultRamp", 0) if !($args[0]);
+    $args[0] = AttrVal($ledDevice->{NAME}, "defaultRamp", 0) if !defined($args[0]);
   }
 
   if ($cmd eq 'on')
