@@ -1,5 +1,5 @@
 ##############################################
-# $Id: 32_WifiLight.pm 82 2015-02-01 21:45:00Z herrmannj $
+# $Id: 32_WifiLight.pm 84 2015-05-01 20:30:00Z herrmannj $
 
 # TODO
 # doku
@@ -35,9 +35,11 @@
 # 77 milight RGBW2: critical cmds sendout repeatly
 # 78 add attrib for color managment (rgb types)
 # 79 add LD382 RGB ony mode
-# 80 HSV2fourChannel bug fixed
+# 80 HSV2fourChannel bug fixed (thnx to lexorius)
 # 81 LW12FC added 
 # 82 LD382A (FW 1.0.6)
+# 83 fixed ramp handling (thnx to henryk)
+# 84 sengled boost added (thnx to scooty)
 
 # verbose level
 # 0: quit
@@ -327,8 +329,30 @@ WifiLight_Define($$)
       $hash->{helper}->{llLock} = 0;
     }
   }
+  
+if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
+  {
+    return "only White supported by SENGLED" if ($a[2] ne "White"); 
+    $hash->{CONNECTION} = $1;
+    $hash->{IP} = $2;
+    $hash->{PORT} = $3?$3:9060;
+    @{$hash->{helper}->{hlCmdQueue}} = ();
+    if (!defined($hash->{helper}->{SOCKET}))
+    {
+      my $sock = IO::Socket::INET-> new (
+        PeerPort => $hash->{PORT},
+        PeerAddr => $hash->{IP},
+        Blocking => 0,
+        Proto => 'udp') or Log3 ($hash, 3, "define $hash->{NAME}: can't reach ($@)");
+      my $select = IO::Select->new($sock);
+      $hash->{helper}->{SOCKET} = $sock;
+      $hash->{helper}->{SELECT} = $select;
+      @{$hash->{helper}->{llCmdQueue}} = ();
+      $hash->{helper}->{llLock} = 0;
+    }
+  }
 
-  return "unknown connection type: choose one of bridge-V3:<ip>|LW12:<ip>|LW12HX:<ip>|LD316:<ip>|LD382:<ip> " if !(defined($hash->{CONNECTION})); 
+  return "unknown connection type: choose one of bridge-V3:<ip>|LW12:<ip>|LW12HX:<ip>|LD316:<ip>|LD382:<ip>|SENGLED:<ip> " if !(defined($hash->{CONNECTION})); 
 
   Log3 ($hash, 4, "define $a[0] $a[1] $a[2] $a[3]");
 
@@ -488,6 +512,14 @@ WifiLight_Define($$)
       return "no free slot at $hash->{CONNECTION} ($hash->{IP}) for $hash->{LEDTYPE}";
     }
   }
+  
+  if (($hash->{LEDTYPE} eq 'White') && ($hash->{CONNECTION} =~ 'SENGLED'))
+  {
+    $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 1);
+    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown";
+    return undef;
+  }
+  
   return "$hash->{LEDTYPE} is not supported at $hash->{CONNECTION} ($hash->{IP})";
 }
 
@@ -572,10 +604,11 @@ WifiLight_Set(@)
     return WifiLight_RGBLW12_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LW12'));
     return WifiLight_RGBLW12HX_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LW12HX'));
     return WifiLight_RGBLW12FC_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LW12FC'));
+    return WifiLight_WhiteSENGLED_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} eq 'SENGLED'));
     return WifiLight_RGB_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
     return WifiLight_RGBW1_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW1') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
-    return WifiLight_RGBW2_On($ledDevice, $ramp) if ($ledDevice->{LEDTYPE} eq 'RGBW2');
-    return WifiLight_White_On($ledDevice, $ramp) if ($ledDevice->{LEDTYPE} eq 'White');
+    return WifiLight_RGBW2_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW2') && ($ledDevice->{CONNECTION} eq 'bridge-V3'));
+    return WifiLight_White_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
   }
 
   if ($cmd eq 'off')
@@ -594,10 +627,11 @@ WifiLight_Set(@)
     return WifiLight_RGBLW12_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LW12'));
     return WifiLight_RGBLW12HX_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LW12HX'));
     return WifiLight_RGBLW12FC_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LW12FC'));
+    return WifiLight_WhiteSENGLED_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} eq 'SENGLED'));
     return WifiLight_RGB_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
     return WifiLight_RGBW1_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW1') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
-    return WifiLight_RGBW2_Off($ledDevice, $ramp) if ($ledDevice->{LEDTYPE} eq 'RGBW2');
-    return WifiLight_White_Off($ledDevice, $ramp) if ($ledDevice->{LEDTYPE} eq 'White');
+    return WifiLight_RGBW2_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW2') && ($ledDevice->{CONNECTION} eq 'bridge-V3'));
+    return WifiLight_White_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
   }
 
   if ($cmd eq 'dimup')
@@ -614,10 +648,11 @@ WifiLight_Set(@)
     return WifiLight_RGBLW12_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LW12'));
     return WifiLight_RGBLW12HX_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LW12HX'));
     return WifiLight_RGBLW12FC_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LW12FC'));
+    return WifiLight_WhiteSENGLED_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} eq 'SENGLED'));
     return WifiLight_RGB_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
     return WifiLight_RGBW1_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGBW1') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
-    return WifiLight_RGBW2_Dim($ledDevice, $v, 0, '') if ($ledDevice->{LEDTYPE} eq 'RGBW2');
-    return WifiLight_White_Dim($ledDevice, $v, 0, '') if ($ledDevice->{LEDTYPE} eq 'White');
+    return WifiLight_RGBW2_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGBW2') && ($ledDevice->{CONNECTION} eq 'bridge-V3'));
+    return WifiLight_White_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
   }
 
   if ($cmd eq 'dimdown')
@@ -634,16 +669,17 @@ WifiLight_Set(@)
     return WifiLight_RGBLW12_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LW12'));
     return WifiLight_RGBLW12HX_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LW12HX'));
     return WifiLight_RGBLW12FC_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LW12FC'));
+    return WifiLight_WhiteSENGLED_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} eq 'SENGLED'));
     return WifiLight_RGB_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
     return WifiLight_RGBW1_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGBW1') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
-    return WifiLight_RGBW2_Dim($ledDevice, $v, 0, '') if ($ledDevice->{LEDTYPE} eq 'RGBW2');
-    return WifiLight_White_Dim($ledDevice, $v, 0, '') if ($ledDevice->{LEDTYPE} eq 'White');
+    return WifiLight_RGBW2_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGBW2') && ($ledDevice->{CONNECTION} eq 'bridge-V3'));
+    return WifiLight_White_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
   }
 
   if ($cmd eq 'dim')
   {
     return "usage: set $name dim level [seconds]" if ($args[0] !~ /^\d+$/);
-    return "usage: set $name dim level [seconds]" if !($args[0] ~~ [0..100]);
+    return "usage: set $name dim level [seconds]" if (($args[0] < 0) || ($args[0] > 100));
     if (defined($args[1]))
     {
       return "usage: set $name dim level [seconds] [q]" if ($args[1] !~ /^\d?.?\d+$/);
@@ -663,10 +699,11 @@ WifiLight_Set(@)
     return WifiLight_RGBLW12_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LW12'));
     return WifiLight_RGBLW12HX_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LW12HX'));
     return WifiLight_RGBLW12FC_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LW12FC'));
+    return WifiLight_WhiteSENGLED_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} eq 'SENGLED'));
     return WifiLight_RGB_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
     return WifiLight_RGBW1_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'RGBW1') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
-    return WifiLight_RGBW2_Dim($ledDevice, $args[0], $ramp, $flags) if ($ledDevice->{LEDTYPE} eq 'RGBW2');
-    return WifiLight_White_Dim($ledDevice, $args[0], $ramp, $flags) if ($ledDevice->{LEDTYPE} eq 'White');
+    return WifiLight_RGBW2_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'RGBW2') && ($ledDevice->{CONNECTION} eq 'bridge-V[2|3]'));
+    return WifiLight_White_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
   }
 
   if (($cmd eq 'HSV') || ($cmd eq 'RGB'))
@@ -877,13 +914,20 @@ WifiLight_Notify(@)
       $val = defined($ledDevice->{READINGS}->{brightness}->{VAL})?$ledDevice->{READINGS}->{brightness}->{VAL}:0;
       return WifiLight_RGBW2_setHSV($ledDevice, $hue, $sat, $val);
     }
-    elsif (($ledDevice->{LEDTYPE} eq 'White')&& ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'))
+    elsif (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'))
     {
       $hue = defined($ledDevice->{READINGS}->{hue}->{VAL})?$ledDevice->{READINGS}->{hue}->{VAL}:0;
       $sat = defined($ledDevice->{READINGS}->{saturation}->{VAL})?$ledDevice->{READINGS}->{saturation}->{VAL}:0;
       $val = defined($ledDevice->{READINGS}->{brightness}->{VAL})?$ledDevice->{READINGS}->{brightness}->{VAL}:100;
       return WifiLight_White_setHSV($ledDevice, $hue, $sat, $val);
-    }   
+    }
+    elsif (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} eq 'SENGLED'))
+    {
+      $hue = defined($ledDevice->{READINGS}->{hue}->{VAL})?$ledDevice->{READINGS}->{hue}->{VAL}:0;
+      $sat = defined($ledDevice->{READINGS}->{saturation}->{VAL})?$ledDevice->{READINGS}->{saturation}->{VAL}:0;
+      $val = defined($ledDevice->{READINGS}->{brightness}->{VAL})?$ledDevice->{READINGS}->{brightness}->{VAL}:100;
+      return WifiLight_WhiteSENGLED_setHSV($ledDevice, $hue, $sat, $val);
+    }
     else
     {
     }
@@ -1549,6 +1593,92 @@ WifiLight_RGBLW12FC_setHSV(@)
   WifiLight_LowLevelCmdQueue_Add($ledDevice, $msg, $receiver, $delay);
   # unlock ll queue
   return WifiLight_LowLevelCmdQueue_Add($ledDevice, "\x00", $receiver, 0, 1);
+}
+
+###############################################################################
+#
+# device specific controller functions White SENGLED
+# E27 LED Bulb with 
+#
+#
+###############################################################################
+
+sub
+WifiLight_WhiteSENGLED_On(@)
+{
+  my ($ledDevice, $ramp) = @_;
+  # my $delay = 50;
+  # my $on = sprintf("%c%c%c%c%c%c%c%c%c", 0x7E, 0x04, 0x04, 0x01, 0xFF, 0xFF, 0xFF, 0x00, 0xEF);
+  # my $receiver = sockaddr_in($ledDevice->{PORT}, inet_aton($ledDevice->{IP}));
+  # WifiLight_LowLevelCmdQueue_Add($ledDevice, $on, $receiver, $delay);
+  
+  my ($h, $s, $v) = split(',', AttrVal($ledDevice->{NAME}, "defaultColor", "0,0,100"));
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} White SENGLED set on ($h, $s, $v) $ramp"); 
+  return WifiLight_HSV_Transition($ledDevice, $h, $s, $v, $ramp, '', 100, undef);
+}
+
+sub
+WifiLight_WhiteSENGLED_Off(@)
+{
+  my ($ledDevice, $ramp) = @_;
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} White SENGLED set off $ramp");
+  return WifiLight_WhiteSENGLED_Dim($ledDevice, 0, $ramp, '');
+}
+
+sub
+WifiLight_WhiteSENGLED_Dim(@)
+{
+  my ($ledDevice, $level, $ramp, $flags) = @_;
+  # my $h = ReadingsVal($ledDevice->{NAME}, "hue", 0);
+  # my $s = ReadingsVal($ledDevice->{NAME}, "saturation", 0);
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} White SENGLED dim $level $ramp $flags"); 
+  return WifiLight_HSV_Transition($ledDevice, 0, 0, $level, $ramp, $flags, 100, undef);
+}
+
+sub
+WifiLight_WhiteSENGLED_setHSV(@)
+{
+  my ($ledDevice, $hue, $sat, $val, $isLast) = @_;
+  my $receiver = sockaddr_in($ledDevice->{PORT}, inet_aton($ledDevice->{IP}));
+  my $delay = 50;
+
+  Log3 ($ledDevice, 4, "$ledDevice->{NAME} White SENGLED set h:$hue, s:$sat, v:$val"); 
+  WifiLight_setHSV_Readings($ledDevice, $hue, $sat, $val);
+
+  # apply gamma correction
+  my $gammaVal = $ledDevice->{helper}->{GAMMAMAP}[$val];
+  
+  my @remote = split(/\./, $ledDevice->{helper}->{SOCKET}->peerhost());
+
+  # intro
+  my $msg = sprintf("%c%c%c%c%c", 0x0d, 0x00, 0x02, 0x00, 0x01);
+  # sender, lazy 0x00
+  $msg .= sprintf("%c%c%c%c", 0x00, 0x00, 0x00, 0x00);
+  # destinations
+  $msg .= sprintf("%c%c%c%c", $remote[0], $remote[1], $remote[2], $remote[3] );
+  # sender, lazy 0x00
+  $msg .= sprintf("%c%c%c%c", 0x00, 0x00, 0x00, 0x00);
+  # destinations
+  $msg .= sprintf("%c%c%c%c", $remote[0], $remote[1], $remote[2], $remote[3] );
+  # intro 2
+  $msg .= sprintf("%c%c%c%c%c%c", 0x01, 0x00, 0x01, 0x00, 0x00, 0x00);
+  # cmd level
+  $msg .= sprintf("%c%c", $gammaVal, 0x64);
+  
+  # for safety of tranmission (udp): repeat cmd if its stand-alone or first or last in transition
+  my $repeat = ($isLast)?3:1;
+  for (my $i=0; $i<$repeat; $i++)
+  {
+    # lock ll queue to prevent a bottleneck within llqueue
+    # in cases where the high level queue fills the low level queue (which should not be interrupted) faster then it is processed (send out)
+    # this lock will cause the hlexec intentionally drop frames which can safely be done because there are further frames for processing avialable  
+    $ledDevice->{helper}->{llLock} += 1;
+    WifiLight_LowLevelCmdQueue_Add($ledDevice, $msg, $receiver, $delay);
+    # unlock ll queue after complete cmd is send
+    WifiLight_LowLevelCmdQueue_Add($ledDevice, "\x00", $receiver, 0, 1);
+  }
+  
+  return undef;
 }
 
 ###############################################################################
@@ -2436,10 +2566,11 @@ WifiLight_setHSV(@)
   return WifiLight_RGBLW12_setHSV($ledDevice, $hue, $sat, $val) if ($ledDevice->{CONNECTION} eq 'LW12');
   return WifiLight_RGBLW12HX_setHSV($ledDevice, $hue, $sat, $val) if ($ledDevice->{CONNECTION} eq 'LW12HX');
   return WifiLight_RGBLW12FC_setHSV($ledDevice, $hue, $sat, $val) if ($ledDevice->{CONNECTION} eq 'LW12FC');
+  return WifiLight_WhiteSENGLED_setHSV($ledDevice, $hue, $sat, $val, $isLast) if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} eq 'SENGLED'));
   return WifiLight_RGB_setHSV($ledDevice, $hue, $sat, $val) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
   return WifiLight_RGBW1_setHSV($ledDevice, $hue, $sat, $val) if (($ledDevice->{LEDTYPE} eq "RGBW1") && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
   return WifiLight_RGBW2_setHSV($ledDevice, $hue, $sat, $val, $isLast) if ($ledDevice->{LEDTYPE} eq "RGBW2");
-  return WifiLight_White_setHSV($ledDevice, $hue, $sat, $val) if ($ledDevice->{LEDTYPE} eq "White");
+  return WifiLight_White_setHSV($ledDevice, $hue, $sat, $val) if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
   return undef;
 }
 

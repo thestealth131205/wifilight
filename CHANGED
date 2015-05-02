@@ -1,3 +1,5 @@
 HSV2fourChannel bug fixed, thnx to lexorius
 LW12FC added (another LW12 clone)
 LD382A added (LD382 version with fw 1.0.6)
+fix ramp 0 with degault ramp settings
+SengLED White added
