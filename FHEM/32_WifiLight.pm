@@ -1,5 +1,5 @@
 ##############################################
-# $Id: 32_WifiLight.pm 84 2015-05-01 20:30:00Z herrmannj $
+# $Id: 32_WifiLight.pm 85 2015-06-20 20:30:00Z herrmannj $
 
 # TODO
 # doku
@@ -40,6 +40,7 @@
 # 82 LD382A (FW 1.0.6)
 # 83 fixed ramp handling (thnx to henryk)
 # 84 sengled boost added (thnx to scooty)
+# 85 milight white, improved resilience
 
 # verbose level
 # 0: quit
@@ -2518,8 +2519,11 @@ WifiLight_White_setLevels(@)
   my @bulbCmdsOn = ("\x38", "\x3D", "\x37", "\x32");
   my @bulbCmdsOff = ("\x3B", "\x33", "\x3A", "\x36");
   my $receiver = sockaddr_in($ledDevice->{PORT}, inet_aton($ledDevice->{IP}));
-  my $delay = 100;
+  my $delay = 50;
 
+  # alert that dump receiver, give it a extra wake up call 
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, @bulbCmdsOn[$ledDevice->{SLOT} -1]."\x00\x55", $receiver, 100) if ($ledDevice->{helper}->{whiteLevel} != $wl);
+  
   if ($ledDevice->{helper}->{whiteLevel} > $wl)
   {
     WifiLight_LowLevelCmdQueue_Add($ledDevice, @bulbCmdsOn[$ledDevice->{SLOT} -1]."\x00\x55", $receiver, $delay); # group on
@@ -2530,6 +2534,11 @@ WifiLight_White_setLevels(@)
     }
     if ($wl == 0)
     {
+      # special precaution, giving extra downsteps to do a sync each time you switch off
+      for (my $i=0; $i<12; $i++)
+      {
+        WifiLight_LowLevelCmdQueue_Add($ledDevice, "\x34\x00\x55", $receiver, 25); # brightness down
+      }
       WifiLight_LowLevelCmdQueue_Add($ledDevice, @bulbCmdsOff[$ledDevice->{SLOT} -1]."\x00\x55", $receiver, $delay); # group off
     }
   }
