@@ -3,5 +3,9 @@ LW12FC added (another LW12 clone)
 LD382A added (LD382 version with fw 1.0.6)
 fix ramp 0 with deault ramp settings
 SengLED White added
+<<<<<<< HEAD
 milight white, improved reliability
 milight rgbw2 dim bug
+=======
+milight white, improved resilience
+>>>>>>> 54252595ec7381f9c026b606f89cbfcbc9b0f1c3
