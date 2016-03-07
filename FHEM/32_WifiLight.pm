@@ -362,7 +362,7 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
   if (($hash->{LEDTYPE} eq 'RGB') && ($hash->{CONNECTION} =~ 'LW12'))
   {
     $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.65);
-    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB";
+    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB hue redye saturation tinge";
     # color cast defaults in r,y, g, c, b, m: +/-30°
     my $cc = '0, -20, -20, -25, 0, -10';
     $attr{$name}{"colorCast"} = $cc;
@@ -375,7 +375,7 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
   if (($hash->{LEDTYPE} eq 'RGB') && ($hash->{CONNECTION} =~ 'LW12HX'))
   {
     $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.65);
-    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB";
+    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB hue redye saturation tinge";
     # color cast defaults in r,y, g, c, b, m: +/-30°
     my $cc = '0, -20, -20, -25, 0, -10';
     $attr{$name}{"colorCast"} = $cc;
@@ -388,7 +388,7 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
   if (($hash->{LEDTYPE} eq 'RGB') && ($hash->{CONNECTION} =~ 'LW12FC'))
   {
     $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.85);
-    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB";
+    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB hue redye saturation tinge";
     # color cast defaults in r,y, g, c, b, m: +/-30°
     my $cc = '0, -20, -20, -25, 0, -10';
     $attr{$name}{"colorCast"} = $cc;
@@ -401,7 +401,7 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
   if (($hash->{LEDTYPE} eq 'RGBW') && ($hash->{CONNECTION} =~ 'LD316'))
   {
     $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.65);
-    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB";
+    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB hue redye saturation tinge";
     # color cast defaults in r,y, g, c, b, m: +/-30°
     my $cc = '0, -25, -15, -25, 0, -20';
     $attr{$name}{"colorCast"} = $cc;
@@ -414,7 +414,7 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
   if (($hash->{LEDTYPE} eq 'RGBW') && ($hash->{CONNECTION} =~ 'LD382'))
   {
     $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.65);
-    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB";
+    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB hue redye saturation tinge";
     # color cast defaults in r,y, g, c, b, m: +/-30°
     my $cc = '0, -20, -20, -25, 0, -10';
     $attr{$name}{"colorCast"} = $cc;
@@ -427,7 +427,7 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
   if (($hash->{LEDTYPE} eq 'RGB') && ($hash->{CONNECTION} =~ 'LD382'))
   {
     $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.65);
-    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB";
+    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB hue redye saturation tinge";
     # color cast defaults in r,y, g, c, b, m: +/-30°
     my $cc = '0, -20, -20, -25, 0, -10';
     $attr{$name}{"colorCast"} = $cc;
@@ -440,7 +440,7 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
   if (($hash->{LEDTYPE} eq 'RGBW') && ($hash->{CONNECTION} =~ 'LD382A'))
   {
     $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.65);
-    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB";
+    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB hue redye saturation tinge";
     # color cast defaults in r,y, g, c, b, m: +/-30°
     my $cc = '0, -20, -20, -25, 0, -10';
     $attr{$name}{"colorCast"} = $cc;
@@ -453,7 +453,7 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
   if (($hash->{LEDTYPE} eq 'RGB') && ($hash->{CONNECTION} =~ 'LD382A'))
   {
     $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.65);
-    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB";
+    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB hue redye saturation tinge";
     # color cast defaults in r,y, g, c, b, m: +/-30°
     my $cc = '0, -20, -20, -25, 0, -10';
     $attr{$name}{"colorCast"} = $cc;
@@ -469,7 +469,7 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
     $hash->{SLOT} = 0;
     $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 1);
     $hash->{helper}->{COLORMAP} = WifiLight_Milight_ColorConverter($hash);
-    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB sync pair unpair";
+    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB hue redye saturation tinge sync pair unpair";
     #if we are allready paired: sync to get a defined state
     return WifiLight_RGB_Sync($hash) if ($hash->{LEDTYPE} eq 'RGB');
     return WifiLight_RGBW1_Sync($hash) if ($hash->{LEDTYPE} eq 'RGBW1');
@@ -487,7 +487,7 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
       $hash->{SLOT} = $i;
       $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.73);
       $hash->{helper}->{COLORMAP} = WifiLight_Milight_ColorConverter($hash);
-      $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB sync pair unpair";
+      $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB hue redye saturation tinge sync pair unpair";
       return WifiLight_RGBW2_Sync($hash);
     }
     else
@@ -582,7 +582,7 @@ WifiLight_Set(@)
     return WifiLight_White_Sync($ledDevice) if ($ledDevice->{LEDTYPE} eq 'White');
   }
   
-  if (($cmd eq 'HSV') || ($cmd eq 'RGB') || ($cmd eq 'dim'))
+  if (($cmd eq 'HSV') || ($cmd eq 'RGB') || ($cmd eq 'hue') || ($cmd eq 'redye') || ($cmd eq 'saturation') || ($cmd eq 'tinge') || ($cmd eq 'dim'))
   {
     $args[1] = AttrVal($ledDevice->{NAME}, "defaultRamp", 0) if !defined($args[1]);
   }
@@ -709,7 +709,7 @@ WifiLight_Set(@)
     return WifiLight_White_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
   }
 
-  if (($cmd eq 'HSV') || ($cmd eq 'RGB'))
+  if (($cmd eq 'HSV') || ($cmd eq 'RGB') || ($cmd eq 'hue') || ($cmd eq 'redye') || ($cmd eq 'saturation') ||($cmd eq 'tinge'))
   {
     my ($hue, $sat, $val);
     
@@ -726,7 +726,46 @@ WifiLight_Set(@)
       return "RGB is required hex RRGGBB" if (defined($args[0]) && $args[0] !~ /^[0-9A-Fa-f]{6}$/);
       ($hue, $sat, $val) = WifiLight_RGB2HSV($ledDevice, $args[0]);
     }
-    
+    elsif ($cmd eq 'hue' || $cmd eq 'redye') 
+    {
+      if($cmd eq 'hue') 
+      {
+        $hue = $args[0];
+        return "invalid hue ($hue): expected positive integer" if ($hue !~ /^\d+$/);
+        return "invalid hue ($hue): valid range 0..360" if ($hue < 0 || $hue > 360);
+      } 
+      elsif($cmd eq 'redye') 
+      {
+        my $hue_delta = $args[0];
+        return "invalid hue delta ($hue_delta): expected integer" if ($hue_delta !~ /^-?\d+$/);
+        $hue = (ReadingsVal($ledDevice->{NAME}, "hue", 0) + $hue_delta) % 360;
+      }
+      $sat = ReadingsVal($ledDevice->{NAME}, "saturation", 100);
+      $val = ReadingsVal($ledDevice->{NAME}, "brightness", 100);
+    }
+    elsif ($cmd eq 'saturation' || $cmd eq 'tinge') 
+    {
+      if($cmd eq 'saturation') 
+      {
+        $sat = $args[0];
+        return "invalid saturation ($sat): expected positive integer" if ($sat !~ /^\d+$/);
+        return "invalid saturation ($sat): valid range 0..100" if ($sat < 0 || $sat > 100);
+      } 
+      elsif($cmd eq 'tinge') 
+      {
+        my $sat_delta = $args[0];
+        return "invalid sat delta ($sat_delta): expected integer" if ($sat_delta !~ /^-?\d+$/);
+        $sat = ReadingsVal($ledDevice->{NAME}, "saturation", 0) + $sat_delta;
+        if($sat < 0) {
+          $sat = 0;
+        } elsif($sat > 100) {
+          $sat = 100;
+        }
+      }
+      $hue = ReadingsVal($ledDevice->{NAME}, "hue", 0);
+      $val = ReadingsVal($ledDevice->{NAME}, "brightness", 100);
+    }
+
     if (defined($args[1]))
     {
       return "usage: set $name HSV H,S,V seconds flags programm" if ($args[1] !~ /^\d?.?\d+$/);
