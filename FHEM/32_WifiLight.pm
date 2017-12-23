@@ -1,11 +1,12 @@
 ##############################################
-# $Id: 32_WifiLight.pm 87 2015-06-30 12:30:00Z herrmannj $
+# $Id: 32_WifiLight.pm 10404 2016-01-07 21:39:44Z herrmannj $
 
 # TODO
-# doku
-
 
 # versions
+# 00 POC
+# ..
+# 50 Stable
 # 51 new milight color converter
 # 52 timing for transitions: drop frames if required
 # 53 transition names and events
@@ -43,6 +44,11 @@
 # 85 milight white, improved reliability
 # 86 milight white, improved reliability / mark II
 # 87 milight rgbw2, dim bug
+# 88 readingFnAttributes
+# 89 add LD316A
+# 90 Sunricher poc
+# 91 LD686 add RGBWW
+# 92 LD686 with additional setvalues (hue, brigtness, saturation, warmwhite)
 
 # verbose level
 # 0: quit
@@ -73,14 +79,16 @@ WifiLight_Initialize(@)
 
   FHEM_colorpickerInit();
 
-  $hash->{DefFn}   = "WifiLight_Define";
-  $hash->{UndefFn} = "WifiLight_Undef";
-  $hash->{ShutdownFn} = "WifiLight_Undef";
-  $hash->{SetFn} = "WifiLight_Set";
-  $hash->{GetFn} = "WifiLight_Get";
-  $hash->{AttrFn} = "WifiLight_Attr";
-  $hash->{NotifyFn}  = "WifiLight_Notify";
-  $hash->{AttrList}     = "gamma dimStep defaultColor defaultRamp colorCast whitePoint";
+  $hash->{DefFn}        = "WifiLight_Define";
+  $hash->{UndefFn}      = "WifiLight_Undef";
+  $hash->{ShutdownFn}   = "WifiLight_Undef";
+  $hash->{SetFn}        = "WifiLight_Set";
+  $hash->{GetFn}        = "WifiLight_Get";
+  $hash->{AttrFn}       = "WifiLight_Attr";
+  $hash->{NotifyFn}     = "WifiLight_Notify";
+  $hash->{AttrList}     = "gamma dimStep defaultColor defaultRamp colorCast whitePoint"
+                          ." $readingFnAttributes";
+      
 
   return undef;
 }
@@ -94,7 +102,7 @@ WifiLight_Define($$)
   my $key;
 
   return "wrong syntax: define <name> WifiLight <type> <connection>" if(@a != 4);
-  return "unknown LED type ($a[2]): choose one of RGB, RGBW, RGBW1, RGBW2, White" unless (grep /$a[2]/, ('RGB', 'RGBW', 'RGBW1', 'RGBW2', 'White')); 
+  # return "unknown LED type ($a[2]): choose one of RGB, RGBW, RGBW1, RGBW2, White" unless (grep /$a[2]/, ('RGB', 'RGBW', 'RGBW1', 'RGBW2', 'White')); 
   
   $hash->{LEDTYPE} = $a[2];
   my $otherLights;
@@ -280,6 +288,56 @@ WifiLight_Define($$)
       $hash->{helper}->{llLock} = 0;
     }
   }
+  
+  if ($a[3] =~ m/(LD316A):([^:]+):*(\d+)*/g)
+  {
+    return "only RGBW supported by LD316A" if ($a[2] ne "RGBW"); 
+    $hash->{CONNECTION} = $1;
+    $hash->{IP} = $2;
+    $hash->{PORT} = $3?$3:5577;
+    $hash->{PROTO} = 1;
+    $hash->{SLOT} = 0;
+    @{$hash->{helper}->{hlCmdQueue}} = ();
+    if (!defined($hash->{helper}->{SOCKET}))
+    {
+      my $sock = IO::Socket::INET-> new (
+        PeerPort => $hash->{PORT},
+        PeerAddr => $hash->{IP},
+        Timeout => 1,
+        Blocking => 0,
+        Proto => 'tcp') or Log3 ($hash, 3, "define $hash->{NAME}: can't reach ($@)");
+      my $select = IO::Select->new($sock);
+      $hash->{helper}->{SOCKET} = $sock;
+      $hash->{helper}->{SELECT} = $select;
+      @{$hash->{helper}->{llCmdQueue}} = ();
+      $hash->{helper}->{llLock} = 0;
+    }
+  }
+
+  if ($a[3] =~ m/(LD686):([^:]+):*(\d+)*/g)
+  {
+    return "only RGBW or RGBWW supported by LD686" if (($a[2] ne "RGBW") && ($a[2] ne "RGBWW")); 
+    $hash->{CONNECTION} = $1;
+    $hash->{IP} = $2;
+    $hash->{PORT} = $3?$3:5577;
+    $hash->{PROTO} = 1;
+    $hash->{SLOT} = 0;
+    @{$hash->{helper}->{hlCmdQueue}} = ();
+    if (!defined($hash->{helper}->{SOCKET}))
+    {
+      my $sock = IO::Socket::INET-> new (
+        PeerPort => $hash->{PORT},
+        PeerAddr => $hash->{IP},
+        Timeout => 1,
+        Blocking => 0,
+        Proto => 'tcp') or Log3 ($hash, 3, "define $hash->{NAME}: can't reach ($@)");
+      my $select = IO::Select->new($sock);
+      $hash->{helper}->{SOCKET} = $sock;
+      $hash->{helper}->{SELECT} = $select;
+      @{$hash->{helper}->{llCmdQueue}} = ();
+      $hash->{helper}->{llLock} = 0;
+    }
+  }
 
   if ($a[3] =~ m/(LD382):([^:]+):*(\d+)*/g)
   {
@@ -333,7 +391,7 @@ WifiLight_Define($$)
     }
   }
   
-if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
+  if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
   {
     return "only White supported by SENGLED" if ($a[2] ne "White"); 
     $hash->{CONNECTION} = $1;
@@ -354,15 +412,65 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
       $hash->{helper}->{llLock} = 0;
     }
   }
+  
+  if ($a[3] =~ m/(SUNRICHER):([^:]+):*(\d+)*/gi)
+  {
+    # return "only White, DualWhite, RGB, RGBW supported by Sunricher" if ($a[2] ne 'RGBW');
+    $hash->{CONNECTION} = uc $1;
+    $hash->{IP} = $2;
+    $hash->{PORT} = $3?$3:8899;
+    $hash->{PROTO} = 1;
+    $hash->{SLOT} = 0;
+    @{$hash->{helper}->{hlCmdQueue}} = ();
+    @{$hash->{helper}->{llCmdQueue}} = ();
+    $hash->{helper}->{llLock} = 0;
+    if (!defined($hash->{helper}->{SOCKET}))
+    {
+      my $sock = IO::Socket::INET-> new (
+        PeerPort => $hash->{PORT},
+        PeerAddr => $hash->{IP},
+        Timeout => 1,
+        Blocking => 0,
+        Proto => 'tcp') or Log3 ($hash, 3, "define $hash->{NAME}: can't reach ($@)");
+      my $select = IO::Select->new($sock);
+      $hash->{helper}->{SOCKET} = $sock;
+      $hash->{helper}->{SELECT} = $select;
+    }
+  }
 
-  return "unknown connection type: choose one of bridge-V3:<ip>|LW12:<ip>|LW12HX:<ip>|LD316:<ip>|LD382:<ip>|SENGLED:<ip> " if !(defined($hash->{CONNECTION})); 
+  if ($a[3] =~ m/(SUNRICHERA):([^:]+):*(\d+)*/gi)
+  {
+    # return "only White, DualWhite, RGB, RGBW supported by Sunricher" if ($a[2] ne 'RGBW');
+    $hash->{CONNECTION} = uc $1;
+    $hash->{IP} = $2;
+    $hash->{PORT} = $3?$3:8899;
+    $hash->{PROTO} = 1;
+    $hash->{SLOT} = 0;
+    @{$hash->{helper}->{hlCmdQueue}} = ();
+    if (!defined($hash->{helper}->{SOCKET}))
+    {
+      my $sock = IO::Socket::INET-> new (
+        PeerPort => $hash->{PORT},
+        PeerAddr => $hash->{IP},
+        Timeout => 1,
+        Blocking => 0,
+        Proto => 'tcp') or Log3 ($hash, 3, "define $hash->{NAME}: can't reach ($@)");
+      my $select = IO::Select->new($sock);
+      $hash->{helper}->{SOCKET} = $sock;
+      $hash->{helper}->{SELECT} = $select;
+      @{$hash->{helper}->{llCmdQueue}} = ();
+      $hash->{helper}->{llLock} = 0;
+    }
+  }
+  
+  return "unknown connection type, see documentation" if !(defined($hash->{CONNECTION})); 
 
   Log3 ($hash, 4, "define $a[0] $a[1] $a[2] $a[3]");
 
   if (($hash->{LEDTYPE} eq 'RGB') && ($hash->{CONNECTION} =~ 'LW12'))
   {
     $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.65);
-    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB hue redye saturation tinge";
+    $hash->{helper}->{COMMANDSET} = "toggle on off dim dimup dimdown HSV RGB";
     # color cast defaults in r,y, g, c, b, m: +/-30°
     my $cc = '0, -20, -20, -25, 0, -10';
     $attr{$name}{"colorCast"} = $cc;
@@ -375,7 +483,7 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
   if (($hash->{LEDTYPE} eq 'RGB') && ($hash->{CONNECTION} =~ 'LW12HX'))
   {
     $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.65);
-    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB hue redye saturation tinge";
+    $hash->{helper}->{COMMANDSET} = "toggle on off dim dimup dimdown HSV RGB";
     # color cast defaults in r,y, g, c, b, m: +/-30°
     my $cc = '0, -20, -20, -25, 0, -10';
     $attr{$name}{"colorCast"} = $cc;
@@ -388,7 +496,7 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
   if (($hash->{LEDTYPE} eq 'RGB') && ($hash->{CONNECTION} =~ 'LW12FC'))
   {
     $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.85);
-    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB hue redye saturation tinge";
+    $hash->{helper}->{COMMANDSET} = "toggle on off dim dimup dimdown HSV RGB";
     # color cast defaults in r,y, g, c, b, m: +/-30°
     my $cc = '0, -20, -20, -25, 0, -10';
     $attr{$name}{"colorCast"} = $cc;
@@ -401,7 +509,45 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
   if (($hash->{LEDTYPE} eq 'RGBW') && ($hash->{CONNECTION} =~ 'LD316'))
   {
     $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.65);
-    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB hue redye saturation tinge";
+    $hash->{helper}->{COMMANDSET} = "toggle on off dim dimup dimdown HSV RGB";
+    # color cast defaults in r,y, g, c, b, m: +/-30°
+    my $cc = '0, -25, -15, -25, 0, -20';
+    $attr{$name}{"colorCast"} = $cc;
+    WifiLight_RGB_ColorConverter($hash, split(',', $cc));
+    # white point defaults in r,g,b
+    $attr{$name}{"whitePoint"} = '1.0, 0.6, 0.065';
+    return undef;
+  }
+  
+  if (($hash->{LEDTYPE} eq 'RGBW') && ($hash->{CONNECTION} =~ 'LD316A'))
+  {
+    $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.65);
+    $hash->{helper}->{COMMANDSET} = "toggle on off dim dimup dimdown HSV RGB";
+    # color cast defaults in r,y, g, c, b, m: +/-30°
+    my $cc = '0, -25, -15, -25, 0, -20';
+    $attr{$name}{"colorCast"} = $cc;
+    WifiLight_RGB_ColorConverter($hash, split(',', $cc));
+    # white point defaults in r,g,b
+    $attr{$name}{"whitePoint"} = '1.0, 0.6, 0.065';
+    return undef;
+  }
+
+   if (($hash->{LEDTYPE} eq 'RGBW') && ($hash->{CONNECTION} =~ 'LD686'))
+  {
+    $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.65);
+    $hash->{helper}->{COMMANDSET} = "toggle on off dim dimup dimdown HSV RGB";
+    # color cast defaults in r,y, g, c, b, m: +/-30°
+    my $cc = '0, -25, -15, -25, 0, -20';
+    $attr{$name}{"colorCast"} = $cc;
+    WifiLight_RGB_ColorConverter($hash, split(',', $cc));
+    # white point defaults in r,g,b
+    $attr{$name}{"whitePoint"} = '1.0, 0.6, 0.065';
+    return undef;
+  }
+if (($hash->{LEDTYPE} eq 'RGBWW') && ($hash->{CONNECTION} =~ 'LD686'))
+  {
+    $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.65);
+    $hash->{helper}->{COMMANDSET} = "toggle on off dim dimup dimdown HSV RGB RGBWW WWCW warmwhite hue brightness saturation";
     # color cast defaults in r,y, g, c, b, m: +/-30°
     my $cc = '0, -25, -15, -25, 0, -20';
     $attr{$name}{"colorCast"} = $cc;
@@ -414,7 +560,7 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
   if (($hash->{LEDTYPE} eq 'RGBW') && ($hash->{CONNECTION} =~ 'LD382'))
   {
     $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.65);
-    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB hue redye saturation tinge";
+    $hash->{helper}->{COMMANDSET} = "toggle on off dim dimup dimdown HSV RGB";
     # color cast defaults in r,y, g, c, b, m: +/-30°
     my $cc = '0, -20, -20, -25, 0, -10';
     $attr{$name}{"colorCast"} = $cc;
@@ -427,7 +573,7 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
   if (($hash->{LEDTYPE} eq 'RGB') && ($hash->{CONNECTION} =~ 'LD382'))
   {
     $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.65);
-    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB hue redye saturation tinge";
+    $hash->{helper}->{COMMANDSET} = "toggle on off dim dimup dimdown HSV RGB";
     # color cast defaults in r,y, g, c, b, m: +/-30°
     my $cc = '0, -20, -20, -25, 0, -10';
     $attr{$name}{"colorCast"} = $cc;
@@ -440,7 +586,7 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
   if (($hash->{LEDTYPE} eq 'RGBW') && ($hash->{CONNECTION} =~ 'LD382A'))
   {
     $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.65);
-    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB hue redye saturation tinge";
+    $hash->{helper}->{COMMANDSET} = "toggle on off dim dimup dimdown HSV RGB";
     # color cast defaults in r,y, g, c, b, m: +/-30°
     my $cc = '0, -20, -20, -25, 0, -10';
     $attr{$name}{"colorCast"} = $cc;
@@ -453,7 +599,7 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
   if (($hash->{LEDTYPE} eq 'RGB') && ($hash->{CONNECTION} =~ 'LD382A'))
   {
     $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.65);
-    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB hue redye saturation tinge";
+    $hash->{helper}->{COMMANDSET} = "toggle on off dim dimup dimdown HSV RGB";
     # color cast defaults in r,y, g, c, b, m: +/-30°
     my $cc = '0, -20, -20, -25, 0, -10';
     $attr{$name}{"colorCast"} = $cc;
@@ -469,7 +615,7 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
     $hash->{SLOT} = 0;
     $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 1);
     $hash->{helper}->{COLORMAP} = WifiLight_Milight_ColorConverter($hash);
-    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB hue redye saturation tinge sync pair unpair";
+    $hash->{helper}->{COMMANDSET} = "toggle on off dim dimup dimdown HSV RGB sync pair unpair";
     #if we are allready paired: sync to get a defined state
     return WifiLight_RGB_Sync($hash) if ($hash->{LEDTYPE} eq 'RGB');
     return WifiLight_RGBW1_Sync($hash) if ($hash->{LEDTYPE} eq 'RGBW1');
@@ -487,7 +633,7 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
       $hash->{SLOT} = $i;
       $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.73);
       $hash->{helper}->{COLORMAP} = WifiLight_Milight_ColorConverter($hash);
-      $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB hue redye saturation tinge sync pair unpair";
+      $hash->{helper}->{COMMANDSET} = "toggle on off dim dimup dimdown HSV RGB sync pair unpair";
       return WifiLight_RGBW2_Sync($hash);
     }
     else
@@ -507,7 +653,7 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
     { 
       $hash->{SLOT} = $i;
       $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.8);
-      $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown sync pair unpair";
+      $hash->{helper}->{COMMANDSET} = "toggle on off dim dimup dimdown sync pair unpair";
       return WifiLight_White_Sync($hash);
     }
     else
@@ -519,7 +665,93 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
   if (($hash->{LEDTYPE} eq 'White') && ($hash->{CONNECTION} =~ 'SENGLED'))
   {
     $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 1);
-    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown";
+    $hash->{helper}->{COMMANDSET} = "toggle on off dim dimup dimdown";
+    return undef;
+  }
+  
+  if (($hash->{LEDTYPE} eq 'DualWhite') && ($hash->{CONNECTION} eq 'SUNRICHER'))
+  {
+    $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.65); # TODO CHECK VALUES
+    $hash->{helper}->{COMMANDSET} = "toggle on off dim dimup dimdown";
+    $hash->{helper}->{wLevel} = 0;
+    # color cast defaults in r,y, g, c, b, m: +/-30°
+    # my $cc = '0, -20, -20, -25, 0, -10'; # TODO CHECK VALUES
+    # $attr{$name}{"colorCast"} = $cc;
+    # WifiLight_RGB_ColorConverter($hash, split(',', $cc));
+    # white point defaults in r,g,b
+    # $attr{$name}{"whitePoint"} = '1, 1, 1';
+    return undef;
+  }
+  
+  if (($hash->{LEDTYPE} eq 'RGB') && ($hash->{CONNECTION} eq 'SUNRICHER'))
+  {
+    $hash->{helper}->{COMMANDSET} = 'toggle on off dim dimup dimdown HSV HSVK CT RGB';
+    # init helper
+    $hash->{helper}->{rLevel} = 0;
+    $hash->{helper}->{gLevel} = 0;
+    $hash->{helper}->{bLevel} = 0;
+    # init converter
+    $hash->{helper}->{cmd_pwr} = 'RGBSunricher_setPWR';
+    $hash->{helper}->{cmd_hsv} = 'RGBSunricher_setHSV';
+    # defaults
+    $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.65); # TODO CHECK VALUES
+    # color cast defaults
+    my $cc = '0, -20, -20, -25, 0, -10'; # TODO CHECK VALUES
+    $attr{$name}{"colorCast"} = '0, -20, -20, -25, 0, -10';
+    WifiLight_RGB_ColorConverter($hash, split(',', $cc));
+    # white point defaults in r,g,b
+    $attr{$name}{"whitePoint"} = '1, 1, 1';
+    # TODO init readings
+    return undef;
+  }
+  
+  if (($hash->{LEDTYPE} eq 'RGB') && ($hash->{CONNECTION} eq 'SUNRICHERA'))
+  {
+    $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.65); # TODO CHECK VALUES
+    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB";
+    $hash->{helper}->{rLevel} = 0;
+    $hash->{helper}->{gLevel} = 0;
+    $hash->{helper}->{bLevel} = 0;
+    # color cast defaults in r,y, g, c, b, m: +/-30°
+    my $cc = '0, -20, -20, -25, 0, -10'; # TODO CHECK VALUES
+    $attr{$name}{"colorCast"} = $cc;
+    WifiLight_RGB_ColorConverter($hash, split(',', $cc));
+    # white point defaults in r,g,b
+    $attr{$name}{"whitePoint"} = '1, 1, 1';
+    return undef;
+  }
+  
+  if (($hash->{LEDTYPE} eq 'RGBW') && ($hash->{CONNECTION} eq 'SUNRICHER'))
+  {
+    $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.65); # TODO CHECK VALUES
+    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB";
+    $hash->{helper}->{rLevel} = 0;
+    $hash->{helper}->{gLevel} = 0;
+    $hash->{helper}->{bLevel} = 0;
+    $hash->{helper}->{wLevel} = 0;
+    # color cast defaults in r,y, g, c, b, m: +/-30°
+    my $cc = '0, -20, -20, -25, 0, -10'; # TODO CHECK VALUES
+    $attr{$name}{"colorCast"} = $cc;
+    WifiLight_RGB_ColorConverter($hash, split(',', $cc));
+    # white point defaults in r,g,b
+    $attr{$name}{"whitePoint"} = '1, 1, 1';
+    return undef;
+  }
+  
+  if (($hash->{LEDTYPE} eq 'RGBW') && ($hash->{CONNECTION} eq 'SUNRICHERA'))
+  {
+    $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.65); # TODO CHECK VALUES
+    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown HSV RGB hue";
+    $hash->{helper}->{rLevel} = 0;
+    $hash->{helper}->{gLevel} = 0;
+    $hash->{helper}->{bLevel} = 0;
+    $hash->{helper}->{wLevel} = 0;
+    # color cast defaults in r,y, g, c, b, m: +/-30°
+    my $cc = '0, -20, -20, -25, 0, -10'; # TODO CHECK VALUES
+    $attr{$name}{"colorCast"} = $cc;
+    WifiLight_RGB_ColorConverter($hash, split(',', $cc));
+    # white point defaults in r,g,b
+    $attr{$name}{"whitePoint"} = '1, 1, 1';
     return undef;
   }
   
@@ -536,6 +768,18 @@ sub
 WifiLight_Set(@)
 {
   my ($ledDevice, $name, $cmd, @args) = @_;
+  my $descriptor = '';
+  
+  # remove descriptor from @args
+  for (my $i = $#args; $i >= 0; --$i )
+  {
+    if ($args[$i] =~ /\/d\:(.*)/)
+    {
+      $descriptor = $1;
+      splice (@args, $i, 1);
+    }
+  }
+  
   my $cnt = @args;
   my $ramp = 0;
   my $flags = "";
@@ -582,7 +826,7 @@ WifiLight_Set(@)
     return WifiLight_White_Sync($ledDevice) if ($ledDevice->{LEDTYPE} eq 'White');
   }
   
-  if (($cmd eq 'HSV') || ($cmd eq 'RGB') || ($cmd eq 'hue') || ($cmd eq 'redye') || ($cmd eq 'saturation') || ($cmd eq 'tinge') || ($cmd eq 'dim'))
+  if (($cmd eq 'HSV') || ($cmd eq 'RGB') || ($cmd eq 'dim') || ($cmd eq 'hue'))
   {
     $args[1] = AttrVal($ledDevice->{NAME}, "defaultRamp", 0) if !defined($args[1]);
   }
@@ -600,6 +844,8 @@ WifiLight_Set(@)
       $ramp = $args[0];
     }
     return WifiLight_RGBWLD316_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD316'));
+    return WifiLight_RGBWLD316A_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD316A'));
+    return WifiLight_RGBWLD686_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW' || 'RGBWW') && ($ledDevice->{CONNECTION} eq 'LD686'));
     return WifiLight_RGBWLD382_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD382'));
     return WifiLight_RGBLD382_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LD382'));
     return WifiLight_RGBWLD382A_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD382A'));
@@ -612,6 +858,35 @@ WifiLight_Set(@)
     return WifiLight_RGBW1_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW1') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
     return WifiLight_RGBW2_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW2') && ($ledDevice->{CONNECTION} eq 'bridge-V3'));
     return WifiLight_White_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
+    return WifiLight_DualWhiteSunricher_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'DualWhite') && ($ledDevice->{CONNECTION} eq 'SUNRICHER'));
+    return WifiLight_RGBSunricher_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} =~ /^RGB.?$/) && ($ledDevice->{CONNECTION} =~ /^SUNRICHER.?$/));
+  }
+
+ if ($cmd eq 'toggle')
+  {
+    WifiLight_HighLevelCmdQueue_Clear($ledDevice);
+    if (defined($args[0]))
+    {
+      return "usage: set $name toggle [seconds]" if ($args[0] !~ /^\d?.?\d+$/);
+      $ramp = $args[0];
+    }
+    return WifiLight_RGBWLD316_TOGGLE($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD316'));
+    return WifiLight_RGBWLD316A_TOGGLE($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD316A'));
+    return WifiLight_RGBWLD686_TOGGLE($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW' || 'RGBWW') && ($ledDevice->{CONNECTION} eq 'LD686'));
+    return WifiLight_RGBWLD382_TOGGLE($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD382'));
+    return WifiLight_RGBLD382_TOGGLE($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LD382'));
+    return WifiLight_RGBWLD382A_TOGGLE($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD382A'));
+    return WifiLight_RGBLD382A_TOGGLE($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LD382A'));
+    return WifiLight_RGBLW12_TOGGLE($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LW12'));
+    return WifiLight_RGBLW12HX_TOGGLE($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LW12HX'));
+    return WifiLight_RGBLW12FC_TOGGLE($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LW12FC'));
+    return WifiLight_WhiteSENGLED_TOGGLE($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} eq 'SENGLED'));
+    return WifiLight_RGB_TOGGLE($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
+    return WifiLight_RGBW1_TOGGLE($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW1') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
+    return WifiLight_RGBW2_TOGGLE($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW2') && ($ledDevice->{CONNECTION} eq 'bridge-V3'));
+    return WifiLight_White_TOGGLE($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
+    return WifiLight_DualWhiteSunricher_TOGGLE($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'DualWhite') && ($ledDevice->{CONNECTION} eq 'SUNRICHER'));
+    return WifiLight_RGBSunricher_TOGGLE($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} =~ /^RGB.?$/) && ($ledDevice->{CONNECTION} =~ /^SUNRICHER.?$/));
   }
 
   if ($cmd eq 'off')
@@ -623,6 +898,8 @@ WifiLight_Set(@)
       $ramp = $args[0];
     }
     return WifiLight_RGBWLD316_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD316'));
+    return WifiLight_RGBWLD316A_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD316A'));
+    return WifiLight_RGBWLD686_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW' || 'RGBWW') && ($ledDevice->{CONNECTION} eq 'LD686'));
     return WifiLight_RGBWLD382_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD382'));
     return WifiLight_RGBLD382_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LD382'));
     return WifiLight_RGBWLD382A_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD382A'));
@@ -635,6 +912,8 @@ WifiLight_Set(@)
     return WifiLight_RGBW1_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW1') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
     return WifiLight_RGBW2_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW2') && ($ledDevice->{CONNECTION} eq 'bridge-V3'));
     return WifiLight_White_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
+    return WifiLight_DualWhiteSunricher_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'DualWhite') && ($ledDevice->{CONNECTION} eq 'SUNRICHER'));
+    return WifiLight_RGBSunricher_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} =~ /^RGB.?$/) && ($ledDevice->{CONNECTION} =~ /^SUNRICHER.?$/));
   }
 
   if ($cmd eq 'dimup')
@@ -644,6 +923,8 @@ WifiLight_Set(@)
     my $v = ReadingsVal($ledDevice->{NAME}, "brightness", 0) + AttrVal($ledDevice->{NAME}, "dimStep", 7);
     $v = 100 if $v > 100;
     return WifiLight_RGBWLD316_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD316'));
+    return WifiLight_RGBWLD316A_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD316A'));
+    return WifiLight_RGBWLD686_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGBW' || 'RGBWW') && ($ledDevice->{CONNECTION} eq 'LD686'));
     return WifiLight_RGBWLD382_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD382'));
     return WifiLight_RGBLD382_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LD382'));
     return WifiLight_RGBWLD382A_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD382A'));
@@ -656,6 +937,8 @@ WifiLight_Set(@)
     return WifiLight_RGBW1_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGBW1') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
     return WifiLight_RGBW2_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGBW2') && ($ledDevice->{CONNECTION} eq 'bridge-V3'));
     return WifiLight_White_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
+    return WifiLight_DualWhiteSunricher_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'DualWhite') && ($ledDevice->{CONNECTION} eq 'SUNRICHER'));
+    return WifiLight_RGBSunricher_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} =~ /^RGB.?$/) && ($ledDevice->{CONNECTION} =~ /^SUNRICHER.?$/));
   }
 
   if ($cmd eq 'dimdown')
@@ -665,6 +948,8 @@ WifiLight_Set(@)
     my $v = ReadingsVal($ledDevice->{NAME}, "brightness", 0) - AttrVal($ledDevice->{NAME}, "dimStep", 7);
     $v = 0 if $v < 0;
     return WifiLight_RGBWLD316_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD316'));
+    return WifiLight_RGBWLD316A_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD316A'));
+    return WifiLight_RGBWLD686_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGBW' || 'RGBWW') && ($ledDevice->{CONNECTION} eq 'LD686'));
     return WifiLight_RGBWLD382_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD382'));
     return WifiLight_RGBLD382_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LD382'));
     return WifiLight_RGBWLD382A_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD382A'));
@@ -677,6 +962,8 @@ WifiLight_Set(@)
     return WifiLight_RGBW1_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGBW1') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
     return WifiLight_RGBW2_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGBW2') && ($ledDevice->{CONNECTION} eq 'bridge-V3'));
     return WifiLight_White_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
+    return WifiLight_DualWhiteSunricher_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'DualWhite') && ($ledDevice->{CONNECTION} eq 'SUNRICHER'));
+    return WifiLight_RGBSunricher_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} =~ /^RGB.?$/) && ($ledDevice->{CONNECTION} =~ /^SUNRICHER.?$/));
   }
 
   if ($cmd eq 'dim')
@@ -695,6 +982,8 @@ WifiLight_Set(@)
     }
     WifiLight_HighLevelCmdQueue_Clear($ledDevice) if ($flags !~ m/.*[qQ].*/);
     return WifiLight_RGBWLD316_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD316'));
+    return WifiLight_RGBWLD316A_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD316A'));
+    return WifiLight_RGBWLD686_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'RGBW' || 'RGBWW') && ($ledDevice->{CONNECTION} eq 'LD686'));
     return WifiLight_RGBWLD382_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD382'));
     return WifiLight_RGBLD382_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LD382'));
     return WifiLight_RGBWLD382A_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD382A'));
@@ -707,12 +996,89 @@ WifiLight_Set(@)
     return WifiLight_RGBW1_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'RGBW1') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
     return WifiLight_RGBW2_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'RGBW2') && ($ledDevice->{CONNECTION} eq 'bridge-V3'));
     return WifiLight_White_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
+    return WifiLight_DualWhiteSunricher_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'DualWhite') && ($ledDevice->{CONNECTION} eq 'SUNRICHER'));
+    return WifiLight_RGBSunricher_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} =~ /^RGB.?$/) && ($ledDevice->{CONNECTION} =~ /^SUNRICHER.?$/));
   }
 
-  if (($cmd eq 'HSV') || ($cmd eq 'RGB') || ($cmd eq 'hue') || ($cmd eq 'redye') || ($cmd eq 'saturation') ||($cmd eq 'tinge'))
+if ($cmd eq 'WWCW')
   {
-    my ($hue, $sat, $val);
+    my ($warmw, $coldw);
+    return "WWCW is required as warmwhite,coldwhite [seconds]" if (defined($args[0]) && $args[0] !~ /^\d{1,3},\d{1,3}$/);
+    ($warmw, $coldw) = split(',', $args[0]);
+    return "wrong warmwhite ($warmw): valid range 0..100" if !(($warmw >= 0) && ($warmw <= 100));
+    return "wrong coldwhite ($coldw): valid range 0..100" if !(($coldw >= 0) && ($coldw <= 100));
+    if (defined($args[1]))
+    {
+      return "usage: set $name WWCW level(warmwhite) level(coldwhite) [seconds] [q]" if ($args[1] !~ /^\d?.?\d+$/);
+      $ramp = $args[1];
+    }
+    if (defined($args[2]))
+    {
+      return "usage: set $name WWCW level(warmwhite) level(coldwhite)seconds [q]" if ($args[2] !~ m/.*[qQ].*/);
+      $flags = $args[2];
+    }
+    WifiLight_HighLevelCmdQueue_Clear($ledDevice) if ($flags !~ m/.*[qQ].*/);
+    return WifiLight_RGBWLD686_WWCW($ledDevice, $warmw, $coldw, $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'RGBW' || 'RGBWW') && ($ledDevice->{CONNECTION} eq 'LD686'));
+  }
+  
+if ($cmd eq 'warmwhite')
+  {
+    my ($warmw, $coldw);
+    return "WW is required as warmwhite [seconds]" if (defined($args[0]) && $args[0] !~ /^\d{1,3}$/);
+    $warmw = $args[0];
+    return "wrong warmwhite ($warmw): valid range 0..100" if !(($warmw >= 0) && ($warmw <= 100));
+    if (defined($args[1]))
+    {
+      return "usage: set $name WW level(warmwhite) [seconds] [q]" if ($args[1] !~ /^\d?\d+$/);
+      $ramp = $args[1];
+    }
+    if (defined($args[2]))
+    {
+      return "usage: set $name WWCW level(warmwhite) seconds [q]" if ($args[2] !~ m/.*[qQ].*/);
+      $flags = $args[2];
+    }
+	$coldw = ReadingsVal($ledDevice->{NAME}, "coldwhite", 100);
+    WifiLight_HighLevelCmdQueue_Clear($ledDevice) if ($flags !~ m/.*[qQ].*/);
+    return WifiLight_RGBWLD686_WWCW($ledDevice, $warmw, $coldw, $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'RGBW' || 'RGBWW') && ($ledDevice->{CONNECTION} eq 'LD686'));
+  }
+
+  if (($cmd eq 'HSV') || ($cmd eq 'RGB') || ($cmd eq 'RGBWW') || ($cmd eq 'hue') || ($cmd eq 'brightness') || ($cmd eq 'saturation'))
+  {
+    my ($hue, $sat, $val, $warmw, $coldw);
     
+	$warmw = ReadingsVal($ledDevice->{NAME}, "warmwhite", 100);
+	$coldw = ReadingsVal($ledDevice->{NAME}, "coldwhite", 100);
+	
+	if ($cmd eq 'hue')
+    {
+	  return "hue is required as decimal value" if (defined($args[0]) && $args[0] !~ /^\d{1,3}$/);
+	  $hue = $args[0];
+	  return "wrong hue ($hue): valid range 0..360" if !(($hue >= 0) && ($hue <= 360));
+	  #get sat and brightness from readings
+	  $sat = ReadingsVal($ledDevice->{NAME}, "saturation", 100);
+      $val = ReadingsVal($ledDevice->{NAME}, "brightness", 100);     
+    }
+	
+	if ($cmd eq 'brightness')
+    {
+	  return "brightness is required as decimal value" if (defined($args[0]) && $args[0] !~ /^\d{1,3}$/);
+	  $val = $args[0];
+	  return "wrong brightness ($val): valid range 0..100" if !(($val >= 0) && ($val <= 100));
+	  #get sat and hue from readings
+	  $sat = ReadingsVal($ledDevice->{NAME}, "saturation", 100);
+      $hue = ReadingsVal($ledDevice->{NAME}, "hue", 360);     
+    }
+	if ($cmd eq 'saturation')
+    {
+	  return "saturation is required as decimal value" if (defined($args[0]) && $args[0] !~ /^\d{1,3}$/);
+	  $sat = $args[0];
+	  return "wrong saturation ($sat): valid range 0..100" if !(($sat >= 0) && ($sat <= 100));
+	  #get sat and brightneff from readings
+	  $hue = ReadingsVal($ledDevice->{NAME}, "hue", 360);     
+	  $val = ReadingsVal($ledDevice->{NAME}, "brightness", 100);     
+    }
+	
+	
     if ($cmd eq 'HSV')
     {
       return "HSV is required as h,s,v" if (defined($args[0]) && $args[0] !~ /^\d{1,3},\d{1,3},\d{1,3}$/);
@@ -726,46 +1092,11 @@ WifiLight_Set(@)
       return "RGB is required hex RRGGBB" if (defined($args[0]) && $args[0] !~ /^[0-9A-Fa-f]{6}$/);
       ($hue, $sat, $val) = WifiLight_RGB2HSV($ledDevice, $args[0]);
     }
-    elsif ($cmd eq 'hue' || $cmd eq 'redye') 
+    elsif ($cmd eq 'RGBWW')
     {
-      if($cmd eq 'hue') 
-      {
-        $hue = $args[0];
-        return "invalid hue ($hue): expected positive integer" if ($hue !~ /^\d+$/);
-        return "invalid hue ($hue): valid range 0..360" if ($hue < 0 || $hue > 360);
-      } 
-      elsif($cmd eq 'redye') 
-      {
-        my $hue_delta = $args[0];
-        return "invalid hue delta ($hue_delta): expected integer" if ($hue_delta !~ /^-?\d+$/);
-        $hue = (ReadingsVal($ledDevice->{NAME}, "hue", 0) + $hue_delta) % 360;
-      }
-      $sat = ReadingsVal($ledDevice->{NAME}, "saturation", 100);
-      $val = ReadingsVal($ledDevice->{NAME}, "brightness", 100);
+      return "RGB is required hex RRGGBBWWCW" if (defined($args[0]) && $args[0] !~ /^[0-9A-Fa-f]{10}$/);
+      ($hue, $sat, $val, $warmw, $coldw) = WifiLight_RGB2HSV($ledDevice, $args[0]);
     }
-    elsif ($cmd eq 'saturation' || $cmd eq 'tinge') 
-    {
-      if($cmd eq 'saturation') 
-      {
-        $sat = $args[0];
-        return "invalid saturation ($sat): expected positive integer" if ($sat !~ /^\d+$/);
-        return "invalid saturation ($sat): valid range 0..100" if ($sat < 0 || $sat > 100);
-      } 
-      elsif($cmd eq 'tinge') 
-      {
-        my $sat_delta = $args[0];
-        return "invalid sat delta ($sat_delta): expected integer" if ($sat_delta !~ /^-?\d+$/);
-        $sat = ReadingsVal($ledDevice->{NAME}, "saturation", 0) + $sat_delta;
-        if($sat < 0) {
-          $sat = 0;
-        } elsif($sat > 100) {
-          $sat = 100;
-        }
-      }
-      $hue = ReadingsVal($ledDevice->{NAME}, "hue", 0);
-      $val = ReadingsVal($ledDevice->{NAME}, "brightness", 100);
-    }
-
     if (defined($args[1]))
     {
       return "usage: set $name HSV H,S,V seconds flags programm" if ($args[1] !~ /^\d?.?\d+$/);
@@ -781,9 +1112,14 @@ WifiLight_Set(@)
       return "usage: set $name HSV H,S,V seconds flags programm=[A-Za-z_0-9]" if ($args[3] !~ m/[A-Za-z_0-9]*/);
       $event = $args[3];
     }
+	
+	Log3 ($ledDevice, 3, "$ledDevice->{NAME} set HSV $hue, $sat, $val with ramp: $ramp, cw $coldw ww $warmw flags: ". $flags);
+	
     WifiLight_HighLevelCmdQueue_Clear($ledDevice) if ($flags !~ m/.*[qQ].*/);
     WifiLight_HSV_Transition($ledDevice, $hue, $sat, $val, $ramp, $flags, 100, $event) if ($ledDevice->{CONNECTION} eq 'LD316');
-    WifiLight_HSV_Transition($ledDevice, $hue, $sat, $val, $ramp, $flags, 100, $event) if ($ledDevice->{CONNECTION} eq 'LD382');
+    WifiLight_HSV_Transition($ledDevice, $hue, $sat, $val, $ramp, $flags, 100, $event) if ($ledDevice->{CONNECTION} eq 'LD316A');
+    WifiLight_HSV_Transition($ledDevice, $hue, $sat, $val, $ramp, $flags, 100, $event, $warmw, $coldw) if ($ledDevice->{CONNECTION} eq 'LD686');
+	WifiLight_HSV_Transition($ledDevice, $hue, $sat, $val, $ramp, $flags, 100, $event) if ($ledDevice->{CONNECTION} eq 'LD382');
     WifiLight_HSV_Transition($ledDevice, $hue, $sat, $val, $ramp, $flags, 100, $event) if ($ledDevice->{CONNECTION} eq 'LD382A');
     WifiLight_HSV_Transition($ledDevice, $hue, $sat, $val, $ramp, $flags, 100, $event) if ($ledDevice->{CONNECTION} eq 'LW12');
     WifiLight_HSV_Transition($ledDevice, $hue, $sat, $val, $ramp, $flags, 100, $event) if ($ledDevice->{CONNECTION} eq 'LW12HX');
@@ -791,6 +1127,8 @@ WifiLight_Set(@)
     WifiLight_HSV_Transition($ledDevice, $hue, $sat, $val, $ramp, $flags, 500, $event) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
     WifiLight_HSV_Transition($ledDevice, $hue, $sat, $val, $ramp, $flags, 1000, $event) if (($ledDevice->{LEDTYPE} eq 'RGBW1') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
     WifiLight_HSV_Transition($ledDevice, $hue, $sat, $val, $ramp, $flags, 200, $event) if (($ledDevice->{LEDTYPE} eq 'RGBW2') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
+    WifiLight_HSV_Transition($ledDevice, $hue, $sat, $val, $ramp, $flags, 100, $event) if (($ledDevice->{LEDTYPE} =~ /^RGB.?$/) && ($ledDevice->{CONNECTION} =~ /^SUNRICHER.?$/));
+    return WifiLight_SetHSV_Target($ledDevice, $hue, $sat, $val, $warmw, $coldw) if ($ledDevice->{LEDTYPE} eq 'RGBWW');
     return WifiLight_SetHSV_Target($ledDevice, $hue, $sat, $val);
   }
 }
@@ -839,17 +1177,23 @@ WifiLight_Attr(@)
       return $msg if (abs($tc) >= 30);
     }
     WifiLight_RGB_ColorConverter($ledDevice, @a) if ($ledDevice->{CONNECTION} eq 'LD316');
+    WifiLight_RGB_ColorConverter($ledDevice, @a) if ($ledDevice->{CONNECTION} eq 'LD316A');
+    WifiLight_RGB_ColorConverter($ledDevice, @a) if ($ledDevice->{CONNECTION} eq 'LD686');
     WifiLight_RGB_ColorConverter($ledDevice, @a) if ($ledDevice->{CONNECTION} eq 'LD382');
     WifiLight_RGB_ColorConverter($ledDevice, @a) if ($ledDevice->{CONNECTION} eq 'LD382A');
     WifiLight_RGB_ColorConverter($ledDevice, @a) if ($ledDevice->{CONNECTION} eq 'LW12');
     WifiLight_RGB_ColorConverter($ledDevice, @a) if ($ledDevice->{CONNECTION} eq 'LW12HX');
     WifiLight_RGB_ColorConverter($ledDevice, @a) if ($ledDevice->{CONNECTION} eq 'LW12FC');
+    WifiLight_RGB_ColorConverter($ledDevice, @a) if (($ledDevice->{LEDTYPE} =~ /^RGB.?$/) && ($ledDevice->{CONNECTION} =~ /^SUNRICHER.?$/));
     if ($init_done && !(@{$ledDevice->{helper}->{hlCmdQueue}}))
     {
       my $hue = $ledDevice->{READINGS}->{hue}->{VAL};
       my $sat = $ledDevice->{READINGS}->{saturation}->{VAL};
       my $val = $ledDevice->{READINGS}->{brightness}->{VAL};
-      WifiLight_setHSV($ledDevice, $hue, $sat, $val, 1);
+      my $warmw = $ledDevice->{READINGS}->{warmwhite}->{VAL};
+      my $coldw = $ledDevice->{READINGS}->{coldwhite}->{VAL};
+      WifiLight_setHSV($ledDevice, $hue, $sat, $val, 1, $warmw, $coldw) if ($ledDevice->{LEDTYPE} eq 'RGBWW');      
+      WifiLight_setHSV($ledDevice, $hue, $sat, $val, 1) if ($ledDevice->{LEDTYPE} ne 'RGBWW');
     }
   }
   if ($cmd eq 'set' && $attribName eq 'whitePoint')
@@ -882,7 +1226,7 @@ WifiLight_Notify(@)
 {
   my ($ledDevice, $eventSrc) = @_;
   my $events = deviceEvents($eventSrc, 1);
-  my ($hue, $sat, $val);
+  my ($hue, $sat, $val, $warmw, $coldw);
 
   # wait for global: INITIALIZED after start up
   if ($eventSrc->{NAME} eq 'global' && @{$events}[0] eq 'INITIALIZED')
@@ -920,6 +1264,29 @@ WifiLight_Notify(@)
       $sat = defined($ledDevice->{READINGS}->{saturation}->{VAL})?$ledDevice->{READINGS}->{saturation}->{VAL}:0;
       $val = defined($ledDevice->{READINGS}->{brightness}->{VAL})?$ledDevice->{READINGS}->{brightness}->{VAL}:0;
       return WifiLight_RGBWLD316_setHSV($ledDevice, $hue, $sat, $val);
+    }
+    elsif ($ledDevice->{CONNECTION} eq 'LD316A')
+    {
+      $hue = defined($ledDevice->{READINGS}->{hue}->{VAL})?$ledDevice->{READINGS}->{hue}->{VAL}:0;
+      $sat = defined($ledDevice->{READINGS}->{saturation}->{VAL})?$ledDevice->{READINGS}->{saturation}->{VAL}:0;
+      $val = defined($ledDevice->{READINGS}->{brightness}->{VAL})?$ledDevice->{READINGS}->{brightness}->{VAL}:0;
+      return WifiLight_RGBWLD316A_setHSV($ledDevice, $hue, $sat, $val);
+    }
+    elsif ($ledDevice->{CONNECTION} eq 'LD686' && $ledDevice->{LEDTYPE} eq 'RGBWW')
+    {
+      $hue = defined($ledDevice->{READINGS}->{hue}->{VAL})?$ledDevice->{READINGS}->{hue}->{VAL}:0;
+      $sat = defined($ledDevice->{READINGS}->{saturation}->{VAL})?$ledDevice->{READINGS}->{saturation}->{VAL}:0;
+      $val = defined($ledDevice->{READINGS}->{brightness}->{VAL})?$ledDevice->{READINGS}->{brightness}->{VAL}:0;
+      $warmw = defined($ledDevice->{READINGS}->{warmwhite}->{VAL})?$ledDevice->{READINGS}->{warmwhite}->{VAL}:0;  
+      $coldw = defined($ledDevice->{READINGS}->{coldwhite}->{VAL})?$ledDevice->{READINGS}->{coldwhite}->{VAL}:0;
+      return WifiLight_RGBWLD686_setHSV($ledDevice, $hue, $sat, $val, $warmw, $coldw);
+    }
+    elsif ($ledDevice->{CONNECTION} eq 'LD686')
+    {
+      $hue = defined($ledDevice->{READINGS}->{hue}->{VAL})?$ledDevice->{READINGS}->{hue}->{VAL}:0;
+      $sat = defined($ledDevice->{READINGS}->{saturation}->{VAL})?$ledDevice->{READINGS}->{saturation}->{VAL}:0;
+      $val = defined($ledDevice->{READINGS}->{brightness}->{VAL})?$ledDevice->{READINGS}->{brightness}->{VAL}:0;
+      return WifiLight_RGBWLD686_setHSV($ledDevice, $hue, $sat, $val);
     }
     elsif ($ledDevice->{CONNECTION} eq 'LD382')
     {
@@ -970,11 +1337,399 @@ WifiLight_Notify(@)
       $val = defined($ledDevice->{READINGS}->{brightness}->{VAL})?$ledDevice->{READINGS}->{brightness}->{VAL}:100;
       return WifiLight_WhiteSENGLED_setHSV($ledDevice, $hue, $sat, $val);
     }
+    elsif (($ledDevice->{LEDTYPE} =~ /^RGB.?$/) && ($ledDevice->{CONNECTION} =~ /^SUNRICHER.?$/))
+    {
+      $hue = defined($ledDevice->{READINGS}->{hue}->{VAL})?$ledDevice->{READINGS}->{hue}->{VAL}:0;
+      $sat = defined($ledDevice->{READINGS}->{saturation}->{VAL})?$ledDevice->{READINGS}->{saturation}->{VAL}:0;
+      $val = defined($ledDevice->{READINGS}->{brightness}->{VAL})?$ledDevice->{READINGS}->{brightness}->{VAL}:100;
+      return WifiLight_RGBSunricher_setHSV($ledDevice, $hue, $sat, $val) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'SUNRICHER'));
+      return WifiLight_RGBSunricherA_setHSV($ledDevice, $hue, $sat, $val) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'SUNRICHERA'));
+      return WifiLight_RGBWSunricher_setHSV($ledDevice, $hue, $sat, $val) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'SUNRICHER'));
+      return WifiLight_RGBWSunricherA_setHSV($ledDevice, $hue, $sat, $val) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'SUNRICHERA'));
+    }
+    # 
     else
     {
     }
     return 
   }
+}
+
+###############################################################################
+#
+# generic device types
+# RGB device
+#
+#
+###############################################################################
+
+
+sub
+WifiLight_RGBDevice_On(@)
+{
+  my ($ledDevice, $ramp) = @_;
+  
+  my $delay = 50;
+  my $on = pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x02, 0x12, 0xAB, 0x00, 0xAA, 0xAA );
+  my $receiver;
+  
+  $on = WifiLight_Sunricher_Checksum($ledDevice, $on);
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, $on, $receiver, $delay);
+  
+  # TODO device specific on
+  
+  my ($h, $s, $v, $k) = split(',', AttrVal($ledDevice->{NAME}, "defaultColor", "0,0,100, 3200"));
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} $ledDevice->{LEDTYPE} $ledDevice->{CONNECTION} set on ($h, $s, $v) $ramp"); 
+  return WifiLight_HSV_Transition($ledDevice, $h, $s, $v, $ramp, '', 100, undef);
+}
+
+sub
+WifiLight_RGBDevice_Off(@)
+{
+  my ($ledDevice, $ramp) = @_;
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} $ledDevice->{LEDTYPE} $ledDevice->{CONNECTION} set off $ramp");
+  return WifiLight_RGBDevice_Dim($ledDevice, 0, $ramp, '');
+}
+
+sub
+WifiLight_RGBDevice_Dim(@)
+{
+  my ($ledDevice, $level, $ramp, $flags) = @_;
+  my $h = ReadingsVal($ledDevice->{NAME}, "hue", 0);
+  my $s = ReadingsVal($ledDevice->{NAME}, "saturation", 0);
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} $ledDevice->{LEDTYPE} $ledDevice->{CONNECTION} dim $level $ramp $flags"); 
+  return WifiLight_HSV_Transition($ledDevice, $h, $s, $level, $ramp, $flags, 100, undef);
+}
+
+
+
+###############################################################################
+#
+# device specific controller functions DualWhite SUNRICHER
+# 
+#
+#
+###############################################################################
+
+
+sub
+WifiLight_DualWhiteSunricher_On(@)
+{
+  my ($ledDevice, $ramp) = @_;
+  
+  my $delay = 50;
+  my $on = pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x02, 0x12, 0xAB, 0x00, 0xAA, 0xAA );
+  my $receiver;
+  
+  $on = WifiLight_Sunricher_Checksum($ledDevice, $on);
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, $on, $receiver, $delay);
+  
+  my ($h, $s, $v) = split(',', AttrVal($ledDevice->{NAME}, "defaultColor", "0,0,100"));
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} DualWhite Sunricher set on ($v) $ramp"); 
+  return WifiLight_HSV_Transition($ledDevice, $h, $s, $v, $ramp, '', 100, undef);
+}
+
+sub
+WifiLight_DualWhiteSunricher_Off(@)
+{
+  my ($ledDevice, $ramp) = @_;
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} DualWhite Sunricher set off $ramp");
+  return WifiLight_DualWhiteSunricher_Dim($ledDevice, 0, $ramp, '');
+}
+
+sub
+WifiLight_DualWhiteSunricher_Dim(@)
+{
+  my ($ledDevice, $level, $ramp, $flags) = @_;
+  my $h = ReadingsVal($ledDevice->{NAME}, "hue", 0);
+  my $s = ReadingsVal($ledDevice->{NAME}, "saturation", 0);
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} DualWhite Sunricher dim $level $ramp $flags"); 
+  return WifiLight_HSV_Transition($ledDevice, $h, $s, $level, $ramp, $flags, 100, undef);
+}
+
+sub
+WifiLight_DualWhiteSunricher_setHSV(@)
+{
+  my ($ledDevice, $hue, $sat, $val, $ct) = @_;
+  my $receiver; # = sockaddr_in($ledDevice->{PORT}, inet_aton($ledDevice->{IP}));
+  my $delay = 0;
+
+  Log3 ($ledDevice, 4, "$ledDevice->{NAME} DualWhite Sunricher set h:$hue, s:$sat, v:$val"); 
+  WifiLight_setHSV_Readings($ledDevice, $hue, $sat, $val);
+  # apply gamma correction
+  my $gammaVal = $ledDevice->{helper}->{GAMMAMAP}[$val];
+  
+  my $wt = int($gammaVal * 0x40 / 100);
+  
+  my $msg;
+  # Me$msg .= WifiLight_Sunricher_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x36, 0x10, 0x00, 0xAA, 0xAA));
+  $msg .= WifiLight_Sunricher_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x33, $wt, 0x00, 0xAA, 0xAA));
+  
+  # lock ll queue to prevent a bottleneck within llqueue
+  # in cases where the high level queue fills the low level queue (which should not be interrupted) faster then it is processed (send out)
+  # this lock will cause the hlexec intentionally drop frames which can safely be done because there are further frames for processing avialable  
+  $ledDevice->{helper}->{llLock} += 1;  
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, $msg, $receiver, $delay);
+  # unlock ll queue
+  return WifiLight_LowLevelCmdQueue_Add($ledDevice, "\x00", $receiver, 0, 1);
+}
+
+###############################################################################
+#
+# device specific controller functions RGBW SUNRICHER
+# device range 0x00 0xff
+#
+#
+###############################################################################
+
+
+sub
+WifiLight_RGBSunricher_On(@)
+{
+  my ($ledDevice, $ramp) = @_;
+  
+  my $delay = 50;
+  my $on = pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x02, 0x12, 0xAB, 0x00, 0xAA, 0xAA );
+  my $receiver;
+  
+  $on = WifiLight_Sunricher_Checksum($ledDevice, $on);
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, $on, $receiver, $delay);
+  
+  my ($h, $s, $v) = split(',', AttrVal($ledDevice->{NAME}, "defaultColor", "0,0,100"));
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} $ledDevice->{LEDTYPE} $ledDevice->{CONNECTION} set on ($h, $s, $v) $ramp"); 
+  return WifiLight_HSV_Transition($ledDevice, $h, $s, $v, $ramp, '', 100, undef);
+}
+
+sub
+WifiLight_RGBSunricher_Off(@)
+{
+  my ($ledDevice, $ramp) = @_;
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} $ledDevice->{LEDTYPE} $ledDevice->{CONNECTION} set off $ramp");
+  return WifiLight_RGBWLD382_Dim($ledDevice, 0, $ramp, '');
+}
+
+sub
+WifiLight_RGBSunricher_Dim(@)
+{
+  my ($ledDevice, $level, $ramp, $flags) = @_;
+  my $h = ReadingsVal($ledDevice->{NAME}, "hue", 0);
+  my $s = ReadingsVal($ledDevice->{NAME}, "saturation", 0);
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} $ledDevice->{LEDTYPE} $ledDevice->{CONNECTION} dim $level $ramp $flags"); 
+  return WifiLight_HSV_Transition($ledDevice, $h, $s, $level, $ramp, $flags, 100, undef);
+}
+
+###############################################################################
+#
+#  SUNRICHER Color conversation functions
+# 
+#
+#
+###############################################################################
+
+sub
+WifiLight_RGBSunricher_setHSV(@)
+{
+  my ($ledDevice, $hue, $sat, $val) = @_;
+  my $receiver; # = sockaddr_in($ledDevice->{PORT}, inet_aton($ledDevice->{IP}));
+  my $delay = 0;
+  my $msg = '';
+
+  Log3 ($ledDevice, 4, "$ledDevice->{NAME} RGBW Sunricher set h:$hue, s:$sat, v:$val"); 
+  WifiLight_setHSV_Readings($ledDevice, $hue, $sat, $val);
+  # apply gamma correction
+  my $gammaVal = $ledDevice->{helper}->{GAMMAMAP}[$val];
+
+  # color cast correction
+  my $h = $ledDevice->{helper}->{COLORMAP}[$hue]; 
+  
+  # convert to device 4 channels (remaining r,g,b after substract white, white, rgb)
+  my ($rr, $rg, $rb, $white) = WifiLight_HSV2fourChannel($h, $sat, $gammaVal);
+  
+  $rr = int( $rr * 0x80 / 0xFF );
+  $rg = int( $rg * 0x80 / 0xFF );
+  $rb = int( $rb * 0x80 / 0xFF );
+  $white = int( $white * 0x80 / 0xFF );
+  
+  # TODO CT and white point correction
+  $rr += $white;
+  $rg += $white;
+  $rb += $white;
+  
+  $msg .= WifiLight_Sunricher_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x18, $rr, 0x00, 0xAA, 0xAA)) if ($ledDevice->{helper}->{rLevel} != $rr);
+  $msg .= WifiLight_Sunricher_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x19, $rg, 0x00, 0xAA, 0xAA)) if ($ledDevice->{helper}->{gLevel} != $rg);
+  $msg .= WifiLight_Sunricher_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x20, $rb, 0x00, 0xAA, 0xAA)) if ($ledDevice->{helper}->{bLevel} != $rb);
+  
+  $ledDevice->{helper}->{rLevel} = $rr;
+  $ledDevice->{helper}->{rLevel} = $rg;
+  $ledDevice->{helper}->{rLevel} = $rb;
+  
+  # leave here if nothing to tell
+  return unless $msg;
+  
+  # lock ll queue to prevent a bottleneck within llqueue
+  # in cases where the high level queue fills the low level queue (which should not be interrupted) faster then it is processed (send out)
+  # this lock will cause the hlexec intentionally drop frames which can safely be done because there are further frames for processing avialable  
+  $ledDevice->{helper}->{llLock} += 1;  
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, $msg, $receiver, $delay);
+  # unlock ll queue
+  return WifiLight_LowLevelCmdQueue_Add($ledDevice, "\x00", $receiver, 0, 1);
+}
+sub
+WifiLight_RGBSunricherA_setHSV(@)
+{
+  my ($ledDevice, $hue, $sat, $val) = @_;
+  my $receiver; # = sockaddr_in($ledDevice->{PORT}, inet_aton($ledDevice->{IP}));
+  my $delay = 0;
+  my $msg = '';
+
+  Log3 ($ledDevice, 4, "$ledDevice->{NAME} RGBW Sunricher set h:$hue, s:$sat, v:$val"); 
+  WifiLight_setHSV_Readings($ledDevice, $hue, $sat, $val);
+  # apply gamma correction
+  my $gammaVal = $ledDevice->{helper}->{GAMMAMAP}[$val];
+
+  # color cast correction
+  my $h = $ledDevice->{helper}->{COLORMAP}[$hue]; 
+  
+  # convert to device 4 channels (remaining r,g,b after substract white, white, rgb)
+  my ($rr, $rg, $rb, $white) = WifiLight_HSV2fourChannel($h, $sat, $gammaVal);
+  
+  # TODO CT and white point correction
+  $rr += $white;
+  $rg += $white;
+  $rb += $white;
+  
+  $msg .= WifiLight_Sunricher_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x18, $rr, 0x00, 0xAA, 0xAA)) if ($ledDevice->{helper}->{rLevel} != $rr);
+  $msg .= WifiLight_Sunricher_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x19, $rg, 0x00, 0xAA, 0xAA)) if ($ledDevice->{helper}->{gLevel} != $rg);
+  $msg .= WifiLight_Sunricher_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x20, $rb, 0x00, 0xAA, 0xAA)) if ($ledDevice->{helper}->{bLevel} != $rb);
+  
+  $ledDevice->{helper}->{rLevel} = $rr;
+  $ledDevice->{helper}->{rLevel} = $rg;
+  $ledDevice->{helper}->{rLevel} = $rb;
+  
+  # leave here if nothing to tell
+  return unless $msg;
+  
+  # lock ll queue to prevent a bottleneck within llqueue
+  # in cases where the high level queue fills the low level queue (which should not be interrupted) faster then it is processed (send out)
+  # this lock will cause the hlexec intentionally drop frames which can safely be done because there are further frames for processing avialable  
+  $ledDevice->{helper}->{llLock} += 1;  
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, $msg, $receiver, $delay);
+  # unlock ll queue
+  return WifiLight_LowLevelCmdQueue_Add($ledDevice, "\x00", $receiver, 0, 1);
+}
+
+sub
+WifiLight_RGBWSunricher_setHSV(@)
+{
+  my ($ledDevice, $hue, $sat, $val) = @_;
+  my $receiver; # = sockaddr_in($ledDevice->{PORT}, inet_aton($ledDevice->{IP}));
+  my $delay = 0;
+  my $msg = '';
+
+  Log3 ($ledDevice, 4, "$ledDevice->{NAME} RGBW Sunricher set h:$hue, s:$sat, v:$val"); 
+  WifiLight_setHSV_Readings($ledDevice, $hue, $sat, $val);
+  # apply gamma correction
+  my $gammaVal = $ledDevice->{helper}->{GAMMAMAP}[$val];
+
+  # color cast correction
+  my $h = $ledDevice->{helper}->{COLORMAP}[$hue]; 
+  
+  # convert to device 4 channels (remaining r,g,b after substract white, white, rgb)
+  my ($rr, $rg, $rb, $white) = WifiLight_HSV2fourChannel($h, $sat, $gammaVal);
+  
+  $rr = int( $rr * 0x80 / 0xFF );
+  $rg = int( $rg * 0x80 / 0xFF );
+  $rb = int( $rb * 0x80 / 0xFF );
+  $white = int( $white * 0x80 / 0xFF );
+  
+  $msg .= WifiLight_Sunricher_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x18, $rr, 0x00, 0xAA, 0xAA)) if ($ledDevice->{helper}->{rLevel} != $rr);
+  $msg .= WifiLight_Sunricher_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x19, $rg, 0x00, 0xAA, 0xAA)) if ($ledDevice->{helper}->{gLevel} != $rg);
+  $msg .= WifiLight_Sunricher_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x20, $rb, 0x00, 0xAA, 0xAA)) if ($ledDevice->{helper}->{bLevel} != $rb);
+  $msg .= WifiLight_Sunricher_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x21, $white, 0x00, 0xAA, 0xAA)) if ($ledDevice->{helper}->{wLevel} != $white);
+  
+  $ledDevice->{helper}->{rLevel} = $rr;
+  $ledDevice->{helper}->{rLevel} = $rg;
+  $ledDevice->{helper}->{rLevel} = $rb;
+  $ledDevice->{helper}->{rLevel} = $white;
+  
+  # leave here if nothing to tell
+  return unless $msg;
+  
+  # lock ll queue to prevent a bottleneck within llqueue
+  # in cases where the high level queue fills the low level queue (which should not be interrupted) faster then it is processed (send out)
+  # this lock will cause the hlexec intentionally drop frames which can safely be done because there are further frames for processing avialable  
+  $ledDevice->{helper}->{llLock} += 1;  
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, $msg, $receiver, $delay);
+  # unlock ll queue
+  return WifiLight_LowLevelCmdQueue_Add($ledDevice, "\x00", $receiver, 0, 1);
+}
+
+sub
+WifiLight_RGBWSunricherA_setHSV(@)
+{
+  my ($ledDevice, $hue, $sat, $val) = @_;
+  my $receiver; # = sockaddr_in($ledDevice->{PORT}, inet_aton($ledDevice->{IP}));
+  my $delay = 0;
+  my $msg = '';
+
+  Log3 ($ledDevice, 4, "$ledDevice->{NAME} RGBW Sunricher set h:$hue, s:$sat, v:$val"); 
+  WifiLight_setHSV_Readings($ledDevice, $hue, $sat, $val);
+  # apply gamma correction
+  my $gammaVal = $ledDevice->{helper}->{GAMMAMAP}[$val];
+
+  # color cast correction
+  my $h = $ledDevice->{helper}->{COLORMAP}[$hue]; 
+  
+  # convert to device 4 channels (remaining r,g,b after substract white, white, rgb)
+  my ($rr, $rg, $rb, $white) = WifiLight_HSV2fourChannel($h, $sat, $gammaVal);
+  
+  $rr *= 0x80 / 0xFF;
+  
+  $msg .= WifiLight_Sunricher_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x18, $rr, 0x00, 0xAA, 0xAA)) if ($ledDevice->{helper}->{rLevel} != $rr);
+  $msg .= WifiLight_Sunricher_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x19, $rg, 0x00, 0xAA, 0xAA)) if ($ledDevice->{helper}->{gLevel} != $rg);
+  $msg .= WifiLight_Sunricher_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x20, $rb, 0x00, 0xAA, 0xAA)) if ($ledDevice->{helper}->{bLevel} != $rb);
+  $msg .= WifiLight_Sunricher_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x21, $white, 0x00, 0xAA, 0xAA)) if ($ledDevice->{helper}->{wLevel} != $white);
+  
+  $ledDevice->{helper}->{rLevel} = $rr;
+  $ledDevice->{helper}->{rLevel} = $rg;
+  $ledDevice->{helper}->{rLevel} = $rb;
+  $ledDevice->{helper}->{rLevel} = $white;
+  
+  # leave here if nothing to tell
+  return unless $msg;
+  
+  # lock ll queue to prevent a bottleneck within llqueue
+  # in cases where the high level queue fills the low level queue (which should not be interrupted) faster then it is processed (send out)
+  # this lock will cause the hlexec intentionally drop frames which can safely be done because there are further frames for processing avialable  
+  $ledDevice->{helper}->{llLock} += 1;  
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, $msg, $receiver, $delay);
+  # unlock ll queue
+  return WifiLight_LowLevelCmdQueue_Add($ledDevice, "\x00", $receiver, 0, 1);
+}
+
+###############################################################################
+#
+#  SUNRICHER helper functions
+# 
+#
+###############################################################################
+
+sub
+WifiLight_Sunricher_Checksum(@)
+{
+  my ($ledDevice, $msg) = @_;
+  
+  my @byteStream = unpack('C*', $msg);
+  my $l = @byteStream;
+  my $c = 0;
+  
+  for (my $i=4; $i<($l-3); $i++) {
+    $c += $byteStream[$i];
+  }
+  $c %= 0x100;
+  $byteStream[$l -3]  = $c;
+  $msg = pack('C*', @byteStream);
+  return $msg;
 }
 
 ###############################################################################
@@ -1020,7 +1775,7 @@ WifiLight_RGBWLD316_Dim(@)
 sub
 WifiLight_RGBWLD316_setHSV(@)
 {
-  my ($ledDevice, $hue, $sat, $val) = @_;
+  my ($ledDevice, $hue, $sat, $val, $k) = @_;
   my $receiver = sockaddr_in($ledDevice->{PORT}, inet_aton($ledDevice->{IP}));
   my $delay = 50;
 
@@ -1089,6 +1844,280 @@ WifiLight_RGBWLD316_setHSV(@)
 
 ###############################################################################
 #
+# device specific controller functions RGBW LD316A - new fw. 
+# thnx raspklaus
+#
+###############################################################################
+
+sub
+WifiLight_RGBWLD316A_On(@)
+{
+  my ($ledDevice, $ramp) = @_;
+  my $delay = 50;
+  my $on = sprintf("%c%c%c%c", 0x71, 0x23, 0x0F, 0xA3);
+  my $msg = sprintf("%c%c%c%c%c", 0x56, 0, 0, 0, 0xAA);
+  my $receiver;
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, $on, $receiver, $delay);
+  my ($h, $s, $v) = split(',', AttrVal($ledDevice->{NAME}, "defaultColor", "0,0,100"));
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} RGBW LD316A set on ($h, $s, $v) $ramp"); 
+  return WifiLight_HSV_Transition($ledDevice, $h, $s, $v, $ramp, '', 100, undef);
+}
+
+sub
+WifiLight_RGBWLD316A_Off(@)
+{
+  my ($ledDevice, $ramp) = @_;
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} RGBW LD316A set off $ramp");
+  return WifiLight_RGBWLD316_Dim($ledDevice, 0, $ramp, '');
+}
+
+sub
+WifiLight_RGBWLD316A_Dim(@)
+{
+  my ($ledDevice, $level, $ramp, $flags) = @_;
+  my $h = ReadingsVal($ledDevice->{NAME}, "hue", 0);
+  my $s = ReadingsVal($ledDevice->{NAME}, "saturation", 0);
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} RGBW LD316A dim $level $ramp $flags"); 
+  return WifiLight_HSV_Transition($ledDevice, $h, $s, $level, $ramp, $flags, 100, undef);
+}
+
+sub
+WifiLight_RGBWLD316A_setHSV(@)
+{
+  my ($ledDevice, $hue, $sat, $val) = @_;
+  my $receiver = sockaddr_in($ledDevice->{PORT}, inet_aton($ledDevice->{IP}));
+  my $delay = 50;
+
+  Log3 ($ledDevice, 4, "$ledDevice->{NAME} RGBW LD316A set h:$hue, s:$sat, v:$val"); 
+  WifiLight_setHSV_Readings($ledDevice, $hue, $sat, $val);
+  # apply gamma correction, may be doing it after wb more ok
+  my $gammaVal = $ledDevice->{helper}->{GAMMAMAP}[$val];
+
+  ##########################################
+  # sat is spread by 10% so there is room
+  # for a smoth switch to white and adapt to 
+  # higher brightness of white led
+  ##########################################  
+
+  $sat = ($sat * 1.1) -10;
+  my $wl = ($sat<0)?$sat * -1:0;
+  $sat = ($sat<0)?0:$sat;
+
+  # color cast correction
+  my $h = $ledDevice->{helper}->{COLORMAP}[$hue]; 
+
+  # convert to device 4 channels (remaining r,g,b after substract white, white, rgb)
+  my ($rr, $rg, $rb, $white) = WifiLight_HSV2fourChannel($h, $sat, $gammaVal);
+  my $msg;
+
+  ##########################################
+  # experimental white temp adjustment
+  # G - 50%
+  # B - 04%
+  # sat is spread by 10% so there is room
+  # for a smoth switch to white and adapt to 
+  # higher brightness of whte led
+  ##########################################
+
+  my ($wr, $wg, $wb) = split(',', AttrVal($ledDevice->{NAME}, 'whitePoint', '1, 1, 1'));
+  # rgb mode
+  if (($val > 0) && ($wl == 0)) 
+  {
+    #replace the removed part of white light and apply white balance
+    $rr += int(($white * $wr) + 0.5);
+    $rg += int(($white * $wg) + 0.5);
+    $rb += int(($white * $wb) + 0.5);
+
+    #new proto 0x56, r, g, b, white level, f0 (color) || 0f (white), 0xaa (terminator)
+    $msg = sprintf("%c%c%c%c%c%c%c", 0x31, $rr, $rg, $rb, 0x00, 0xF0, 0x0F);
+  }
+  elsif ($wl > 0)
+  {
+    #smoth brightness adaption of white led
+    my $wo = $gammaVal - ($gammaVal * (10-$wl) * 0.08); #0.07
+    $wo = int(0.5 + ($wo * 2.55));
+    $msg = sprintf("%c%c%c%c%c%c%c", 0x31, 0, 0, 0, $wo, 0x0F, 0x0F);
+  }
+  else
+  {
+    $msg = sprintf("%c%c%c%c%c%c%c", 0x31, 0, 0, 0, 0x00, 0xF0, 0x0F);
+  }
+  #add checksum
+  $msg = WifiLight_RGBWLD382_Checksum($ledDevice, $msg);
+  # lock ll queue to prevent a bottleneck within llqueue
+  # in cases where the high level queue fills the low level queue (which should not be interrupted) faster then it is processed (send out)
+  # this lock will cause the hlexec intentionally drop frames which can safely be done because there are further frames for processing avialable  
+  $ledDevice->{helper}->{llLock} += 1;  
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, $msg, $receiver, $delay);
+  # unlock ll queue
+  return WifiLight_LowLevelCmdQueue_Add($ledDevice, "\x00", $receiver, 0, 1);
+}
+
+###############################################################################
+#
+# device specific controller functions RGBW LD686 (R-G-B-WW-CW) 
+#
+###############################################################################
+
+sub
+WifiLight_RGBWLD686_On(@)
+{
+  my ($ledDevice, $ramp) = @_;
+  my $delay = 50;
+  my $on = sprintf("%c%c%c%c", 0x71, 0x23, 0x0F, 0xA3);
+  my $msg = sprintf("%c%c%c%c%c", 0x56, 0, 0, 0, 0xAA);
+  my $receiver;
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, $on, $receiver, $delay);
+  my ($h, $s, $v, $warmw, $coldw) = split(',', AttrVal($ledDevice->{NAME}, "defaultColor", "0,0,100,100,100"));
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} $ledDevice->{LEDTYPE} LD686 set on ($h, $s, $v) $ramp");
+  return WifiLight_HSV_Transition($ledDevice, $h, $s, $v, $ramp, '', 100, undef, $warmw, $coldw) if ($ledDevice->{LEDTYPE} eq 'RGBWW');
+  return WifiLight_HSV_Transition($ledDevice, $h, $s, $v, $ramp, '', 100, undef);
+}
+
+sub
+WifiLight_RGBWLD686_Off(@)
+{
+  my ($ledDevice, $ramp) = @_;
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} $ledDevice->{LEDTYPE} LD686 set off $ramp");
+  return WifiLight_RGBWLD686_Dim($ledDevice, 0, $ramp, '');
+}
+
+sub
+WifiLight_RGBWLD686_TOGGLE(@)
+{
+my ($ledDevice, $level, $ramp, $flags) = @_;
+my $valuebright = ReadingsVal($ledDevice->{NAME}, "brightness", 0);
+if (($valuebright > 0)) 
+{
+  my ($ledDevice, $ramp) = @_;
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} $ledDevice->{LEDTYPE} LD686 set off $ramp");
+  return WifiLight_RGBWLD686_Dim($ledDevice, 0, $ramp, '');
+	}
+	else
+	{
+  my ($ledDevice, $ramp) = @_;
+  my $delay = 50;
+  my $on = sprintf("%c%c%c%c", 0x71, 0x23, 0x0F, 0xA3);
+  my $msg = sprintf("%c%c%c%c%c", 0x56, 0, 0, 0, 0xAA);
+  my $receiver;
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, $on, $receiver, $delay);
+  my ($h, $s, $v, $warmw, $coldw) = split(',', AttrVal($ledDevice->{NAME}, "defaultColor", "0,0,100,100,100"));
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} $ledDevice->{LEDTYPE} LD686 set on ($h, $s, $v) $ramp");
+  return WifiLight_HSV_Transition($ledDevice, $h, $s, $v, $ramp, '', 100, undef, $warmw, $coldw) if ($ledDevice->{LEDTYPE} eq 'RGBWW');
+  return WifiLight_HSV_Transition($ledDevice, $h, $s, $v, $ramp, '', 100, undef);
+	}
+}
+
+
+sub
+WifiLight_RGBWLD686_Dim(@)
+{
+  my ($ledDevice, $level, $ramp, $flags) = @_;
+  my $h = ReadingsVal($ledDevice->{NAME}, "hue", 0);
+  my $s = ReadingsVal($ledDevice->{NAME}, "saturation", 0);
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} $ledDevice->{LEDTYPE} LD686 dim $level $ramp $flags"); 
+  return WifiLight_HSV_Transition($ledDevice, $h, $s, $level, $ramp, $flags, 100, undef, $level, $level) if ($ledDevice->{LEDTYPE} eq 'RGBWW');
+  return WifiLight_HSV_Transition($ledDevice, $h, $s, $level, $ramp, $flags, 100, undef);
+}
+
+sub
+WifiLight_RGBWLD686_WWCW(@)
+{
+  my ($ledDevice, $warmw, $coldw, $ramp, $flags) = @_;
+  my $h = ReadingsVal($ledDevice->{NAME}, "hue", 360);
+  my $s = ReadingsVal($ledDevice->{NAME}, "saturation", 100);
+  my $v = ReadingsVal($ledDevice->{NAME}, "brightness", 100);
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} $ledDevice->{LEDTYPE} LD686 WWCW $warmw, $coldw, $ramp $flags");
+  return WifiLight_HSV_Transition($ledDevice, $h, $s, $v, $ramp, $flags, 100, undef, $warmw, $coldw);
+}
+
+sub
+WifiLight_RGBWLD686_setHSV(@)
+{
+  my ($ledDevice, $hue, $sat, $val, $warmw, $coldw) = @_;
+  my $receiver = sockaddr_in($ledDevice->{PORT}, inet_aton($ledDevice->{IP}));
+  my $delay = 50;
+
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} $ledDevice->{LEDTYPE} LD686 set h:$hue, s:$sat, v:$val, ww:$warmw, cw:$coldw") if ($ledDevice->{LEDTYPE} eq 'RGBWW');
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} $ledDevice->{LEDTYPE} LD686 set h:$hue, s:$sat, v:$val") if ($ledDevice->{LEDTYPE} ne 'RGBWW'); 
+  WifiLight_setHSV_Readings($ledDevice, $hue, $sat, $val, $warmw, $coldw) if ($ledDevice->{LEDTYPE} eq 'RGBWW');
+  WifiLight_setHSV_Readings($ledDevice, $hue, $sat, $val) if ($ledDevice->{LEDTYPE} ne 'RGBWW');
+  # apply gamma correction, may be doing it after wb more ok
+  my $gammaVal = $ledDevice->{helper}->{GAMMAMAP}[$val];
+
+
+my $msg;
+if (($ledDevice->{LEDTYPE} eq 'RGBWW'))
+{
+   my ($rr, $rg, $rb) = WifiLight_HSV2RGB($hue, $sat, $val);
+   $msg = sprintf("%c%c%c%c%c%c%c%c", 0x31, $rr, $rg, $rb, $warmw, $coldw, 0xFF, 0x0F);
+   Log3 ($ledDevice, 3, "$ledDevice->{NAME} $ledDevice->{LEDTYPE} LD686 set r:$rr, g:$rg, b:$rb, ww:$warmw, cw:$coldw") if ($ledDevice->{LEDTYPE} eq 'RGBWW');
+}
+else
+{
+  ##########################################
+  # sat is spread by 10% so there is room
+  # for a smoth switch to white and adapt to 
+  # higher brightness of white led
+  ##########################################  
+  $sat = ($sat * 1.1) -10;
+  my $wl = ($sat<0)?$sat * -1:0;
+  $sat = ($sat<0)?0:$sat;
+
+  # color cast correction
+  my $h = $ledDevice->{helper}->{COLORMAP}[$hue]; 
+
+  # convert to device 4 channels (remaining r,g,b after substract white, white, rgb)
+  my ($rr, $rg, $rb, $white) = WifiLight_HSV2fourChannel($h, $sat, $gammaVal);
+
+  ##########################################
+  # experimental white temp adjustment
+  # G - 50%
+  # B - 04%
+  # sat is spread by 10% so there is room
+  # for a smoth switch to white and adapt to 
+  # higher brightness of whte led
+  ##########################################
+
+  my ($wr, $wg, $wb) = split(',', AttrVal($ledDevice->{NAME}, 'whitePoint', '1, 1, 1'));
+  # rgb mode
+  if (($val > 0)) 
+  {
+    #replace the removed part of white light and apply white balance
+    $rr += int(($white * $wr) + 0.5);
+    $rg += int(($white * $wg) + 0.5);
+    $rb += int(($white * $wb) + 0.5);
+
+	#smoth brightness adaption of white led
+    my $wo = $gammaVal - ($gammaVal * (10-$wl) * 0.08); #0.07
+    $wo = int(0.5 + ($wo * 2.55));
+  
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} $ledDevice->{LEDTYPE} LD686 set value ($rr, $rg, $rb, $wo)"); 
+
+    #new proto 0x56, r, g, b, white level, cold white level, f0 (color) || 0f (white), 0xaa (terminator)
+    my ($rr, $rg, $rb) = WifiLight_HSV2RGB($hue, $sat, $val);
+    $msg = sprintf("%c%c%c%c%c%c%c%c", 0x31, $rr, $rg, $rb, $wo, 0x00, 0xFF, 0x0F);
+    Log3 ($ledDevice, 3, "$ledDevice->{NAME} $ledDevice->{LEDTYPE} LD686 set r:$rr, g:$rg, b:$rb, ww:$warmw, cw:$coldw") if ($ledDevice->{LEDTYPE} eq 'RGBWW');
+  }
+  else
+  {
+    $msg = sprintf("%c%c%c%c%c%c%c%c", 0x31, 0, 0, 0, 0x00, 0x00, 0xFF, 0x0F);
+  }
+} 
+  #add checksum
+  $msg = WifiLight_RGBWLD382_Checksum($ledDevice, $msg);
+  # lock ll queue to prevent a bottleneck within llqueue
+  # in cases where the high level queue fills the low level queue (which should not be interrupted) faster then it is processed (send out)
+  # this lock will cause the hlexec intentionally drop frames which can safely be done because there are further frames for processing avialable  
+  $ledDevice->{helper}->{llLock} += 1;  
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, $msg, $receiver, $delay);
+  # unlock ll queue
+  return WifiLight_LowLevelCmdQueue_Add($ledDevice, "\x00", $receiver, 0, 1);
+}
+
+
+###############################################################################
+#
 # device specific controller functions LD382 aka Magic UFO
 # with RGBW stripe (RGB and white)
 #
@@ -1116,6 +2145,32 @@ WifiLight_RGBWLD382_Off(@)
   Log3 ($ledDevice, 3, "$ledDevice->{NAME} RGBW LD382 set off $ramp");
   return WifiLight_RGBWLD382_Dim($ledDevice, 0, $ramp, '');
 }
+
+sub
+WifiLight_RGBWLD382_TOGGLE(@)
+{
+my ($ledDevice, $level, $ramp, $flags) = @_;
+my $valuebright = ReadingsVal($ledDevice->{NAME}, "brightness", 0);
+if (($valuebright > 0)) 
+{
+  my ($ledDevice, $ramp) = @_;
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} RGBW LD382 set off $ramp");
+  return WifiLight_RGBWLD382_Dim($ledDevice, 0, $ramp, '');
+	}
+	else
+	{
+  my ($ledDevice, $ramp) = @_;
+  my $delay = 50;
+  my $on = sprintf("%c%c%c", 0x71, 0x23, 0x94);
+  my $msg = sprintf("%c%c%c%c%c", 0x56, 0, 0, 0, 0xAA);
+  my $receiver;
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, $on, $receiver, $delay);
+  my ($h, $s, $v) = split(',', AttrVal($ledDevice->{NAME}, "defaultColor", "0,0,100"));
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} RGBW LD382 set on ($h, $s, $v) $ramp"); 
+  return WifiLight_HSV_Transition($ledDevice, $h, $s, $v, $ramp, '', 100, undef);
+	}
+}
+
 
 sub
 WifiLight_RGBWLD382_Dim(@)
@@ -1193,6 +2248,32 @@ WifiLight_RGBLD382_On(@)
 }
 
 sub
+WifiLight_RGBLD382_TOGGLE(@)
+{
+my ($ledDevice, $level, $ramp, $flags) = @_;
+my $valuebright = ReadingsVal($ledDevice->{NAME}, "brightness", 0);
+if (($valuebright > 0)) 
+{
+  my ($ledDevice, $ramp) = @_;
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} RGB LD382 set off $ramp");
+  return WifiLight_RGBLD382_Dim($ledDevice, 0, $ramp, '');
+	}
+	else
+	{
+  my ($ledDevice, $ramp) = @_;
+  my $delay = 50;
+  my $on = sprintf("%c%c%c", 0x71, 0x23, 0x94);
+  my $msg = sprintf("%c%c%c%c%c", 0x56, 0, 0, 0, 0xAA);
+  my $receiver;
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, $on, $receiver, $delay);
+  my ($h, $s, $v) = split(',', AttrVal($ledDevice->{NAME}, "defaultColor", "0,0,100"));
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} RGB LD382 set on ($h, $s, $v) $ramp"); 
+  return WifiLight_HSV_Transition($ledDevice, $h, $s, $v, $ramp, '', 100, undef);
+	}
+}
+
+
+sub
 WifiLight_RGBLD382_Off(@)
 {
   my ($ledDevice, $ramp) = @_;
@@ -1268,6 +2349,31 @@ WifiLight_RGBWLD382A_On(@)
 }
 
 sub
+WifiLight_RGBWLD382A_TOGGLE(@)
+{
+my ($ledDevice, $level, $ramp, $flags) = @_;
+my $valuebright = ReadingsVal($ledDevice->{NAME}, "brightness", 0);
+if (($valuebright > 0)) 
+{
+  my ($ledDevice, $ramp) = @_;
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} RGBW LD382A set off $ramp");
+  return WifiLight_RGBWLD382A_Dim($ledDevice, 0, $ramp, '');
+	}
+	else
+	{
+  my ($ledDevice, $ramp) = @_;
+  my $delay = 50;
+  my $on = sprintf("%c%c%c%c", 0x71, 0x23, 0x0F, 0xA3);
+  # my $msg = sprintf("%c%c%c%c%c", 0x56, 0, 0, 0, 0xAA);
+  my $receiver;
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, $on, $receiver, $delay);
+  my ($h, $s, $v) = split(',', AttrVal($ledDevice->{NAME}, "defaultColor", "0,0,100"));
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} RGBW LD382A set on ($h, $s, $v) $ramp"); 
+  return WifiLight_HSV_Transition($ledDevice, $h, $s, $v, $ramp, '', 100, undef);
+	}
+}
+
+sub
 WifiLight_RGBWLD382A_Off(@)
 {
   my ($ledDevice, $ramp) = @_;
@@ -1334,6 +2440,31 @@ WifiLight_RGBLD382A_On(@)
   my ($h, $s, $v) = split(',', AttrVal($ledDevice->{NAME}, "defaultColor", "0,0,100"));
   Log3 ($ledDevice, 3, "$ledDevice->{NAME} RGB LD382A set on ($h, $s, $v) $ramp"); 
   return WifiLight_HSV_Transition($ledDevice, $h, $s, $v, $ramp, '', 100, undef);
+}
+
+sub
+WifiLight_RGBLD382A_TOGGLE(@)
+{
+my ($ledDevice, $level, $ramp, $flags) = @_;
+my $valuebright = ReadingsVal($ledDevice->{NAME}, "brightness", 0);
+if (($valuebright > 0)) 
+{
+  my ($ledDevice, $ramp) = @_;
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} RGB LD382A set off $ramp");
+  return WifiLight_RGBLD382A_Dim($ledDevice, 0, $ramp, '');
+	}
+	else
+	{
+  my ($ledDevice, $ramp) = @_;
+  my $delay = 50;
+  my $on = sprintf("%c%c%c%c", 0x71, 0x23, 0x0F, 0xA3);
+  # my $msg = sprintf("%c%c%c%c%c", 0x56, 0, 0, 0, 0xAA);
+  my $receiver;
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, $on, $receiver, $delay);
+  my ($h, $s, $v) = split(',', AttrVal($ledDevice->{NAME}, "defaultColor", "0,0,100"));
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} RGB LD382A set on ($h, $s, $v) $ramp"); 
+  return WifiLight_HSV_Transition($ledDevice, $h, $s, $v, $ramp, '', 100, undef);
+	}
 }
 
 sub
@@ -2561,7 +3692,7 @@ WifiLight_White_setLevels(@)
   my @bulbCmdsOff = ("\x3B", "\x33", "\x3A", "\x36");
   my @bulbCmdsFull = ("\xB8", "\xBD", "\xB7", "\xB2");
   my $receiver = sockaddr_in($ledDevice->{PORT}, inet_aton($ledDevice->{IP}));
-  my $delay = 100;
+  my $delay = 80;
 
   # alert that dump receiver, give it a extra wake up call 
   if ($ledDevice->{helper}->{whiteLevel} != $wl) 
@@ -2585,6 +3716,7 @@ WifiLight_White_setLevels(@)
       WifiLight_LowLevelCmdQueue_Add($ledDevice, "\x34\x00\x55", $receiver, $delay); # brightness down
       WifiLight_LowLevelCmdQueue_Add($ledDevice, "\x34\x00\x55", $receiver, $delay); # brightness down
       WifiLight_LowLevelCmdQueue_Add($ledDevice, @bulbCmdsOff[$ledDevice->{SLOT} -1]."\x00\x55", $receiver, $delay); # group off
+      #WifiLight_LowLevelCmdqueue_Add($ledDevice, @bulbCmdsOff[$ledDevice->{SLOT}-1]."\x00\x55", $receiver, $delay);
     }
   }
    
@@ -2613,8 +3745,11 @@ WifiLight_White_setLevels(@)
 sub
 WifiLight_setHSV(@)
 {
-  my ($ledDevice, $hue, $sat, $val, $isLast) = @_;
+  my ($ledDevice, $hue, $sat, $val, $isLast, $warmw, $coldw) = @_;
   return WifiLight_RGBWLD316_setHSV($ledDevice, $hue, $sat, $val) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD316'));
+  return WifiLight_RGBWLD316A_setHSV($ledDevice, $hue, $sat, $val) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD316A'));
+  return WifiLight_RGBWLD686_setHSV($ledDevice, $hue, $sat, $val) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD686'));
+  return WifiLight_RGBWLD686_setHSV($ledDevice, $hue, $sat, $val, $warmw, $coldw) if (($ledDevice->{LEDTYPE} eq 'RGBWW') && ($ledDevice->{CONNECTION} eq 'LD686'));  
   return WifiLight_RGBWLD382_setHSV($ledDevice, $hue, $sat, $val) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD382'));
   return WifiLight_RGBLD382_setHSV($ledDevice, $hue, $sat, $val) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'LD382'));
   return WifiLight_RGBWLD382A_setHSV($ledDevice, $hue, $sat, $val) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'LD382A'));
@@ -2627,6 +3762,11 @@ WifiLight_setHSV(@)
   return WifiLight_RGBW1_setHSV($ledDevice, $hue, $sat, $val) if (($ledDevice->{LEDTYPE} eq "RGBW1") && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
   return WifiLight_RGBW2_setHSV($ledDevice, $hue, $sat, $val, $isLast) if ($ledDevice->{LEDTYPE} eq "RGBW2");
   return WifiLight_White_setHSV($ledDevice, $hue, $sat, $val) if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
+  return WifiLight_DualWhiteSunricher_setHSV($ledDevice, $hue, $sat, $val) if (($ledDevice->{LEDTYPE} eq 'DualWhite') && ($ledDevice->{CONNECTION} eq 'SUNRICHER'));
+  return WifiLight_RGBSunricher_setHSV($ledDevice, $hue, $sat, $val) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'SUNRICHER'));
+  return WifiLight_RGBSunricherA_setHSV($ledDevice, $hue, $sat, $val) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} eq 'SUNRICHERA'));
+  return WifiLight_RGBWSunricher_setHSV($ledDevice, $hue, $sat, $val) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'SUNRICHER'));
+  return WifiLight_RGBWSunricherA_setHSV($ledDevice, $hue, $sat, $val) if (($ledDevice->{LEDTYPE} eq 'RGBW') && ($ledDevice->{CONNECTION} eq 'SUNRICHERA'));
   return undef;
 }
 
@@ -2643,19 +3783,11 @@ WifiLight_processEvent(@)
 sub
 WifiLight_HSV_Transition(@)
 {
-  my ($ledDevice, $hue, $sat, $val, $ramp, $flags, $delay, $event) = @_;
-  my ($hueFrom, $satFrom, $valFrom, $timeFrom);
+  my ($ledDevice, $hue, $sat, $val, $ramp, $flags, $delay, $event, $warmw, $coldw) = @_;
+  my ($hueFrom, $satFrom, $valFrom, $warmwFrom, $coldwFrom, $timeFrom);
   
   # minimum stepwide
   my $defaultDelay = $delay;
-
-  #TODO remove if tested
-  #if (($ramp || 0) == 0)
-  #{
-  #  Log3 ($ledDevice, 4, "$ledDevice->{NAME} hsv transition without ramp routed to direct settings, hsv $hue, $sat, $val");
-  #  $ledDevice->{helper}->{targetTime} = gettimeofday();
-  #  return WifiLight_HighLevelCmdQueue_Add($ledDevice, $hue, $sat, $val, undef, $delay, undef, undef, $ledDevice->{helper}->{targetTime});
-  #}
 
   # if queue in progess set start vals to last cached hsv target, else set start to actual hsv
   if (@{$ledDevice->{helper}->{hlCmdQueue}} > 0)
@@ -2663,27 +3795,33 @@ WifiLight_HSV_Transition(@)
     $hueFrom = $ledDevice->{helper}->{targetHue};
     $satFrom = $ledDevice->{helper}->{targetSat};
     $valFrom = $ledDevice->{helper}->{targetVal};
+    $warmwFrom = $ledDevice->{helper}->{targetWarmw} if ($ledDevice->{LEDTYPE} eq 'RGBWW');
+    $coldwFrom = $ledDevice->{helper}->{targetColdw} if ($ledDevice->{LEDTYPE} eq 'RGBWW');
     $timeFrom = $ledDevice->{helper}->{targetTime};
-    Log3 ($ledDevice, 5, "$ledDevice->{NAME} prepare start hsv transition (is cached) hsv $hueFrom, $satFrom, $valFrom, $timeFrom");
+    Log3 ($ledDevice, 5, "$ledDevice->{NAME} prepare start hsv transition (is cached) hsv $hueFrom, $satFrom, $valFrom, $warmwFrom, $coldwFrom, $timeFrom") if ($ledDevice->{LEDTYPE} eq 'RGBWW');
+    Log3 ($ledDevice, 5, "$ledDevice->{NAME} prepare start hsv transition (is cached) hsv $hueFrom, $satFrom, $valFrom, $timeFrom") if ($ledDevice->{LEDTYPE} ne 'RGBWW');
   }
   else
   {
     $hueFrom = $ledDevice->{READINGS}->{hue}->{VAL};
     $satFrom = $ledDevice->{READINGS}->{saturation}->{VAL};
     $valFrom = $ledDevice->{READINGS}->{brightness}->{VAL};
+    $warmwFrom = $ledDevice->{READINGS}->{warmwhite}->{VAL} if ($ledDevice->{LEDTYPE} eq 'RGBWW');
+    $coldwFrom = $ledDevice->{READINGS}->{coldwhite}->{VAL} if ($ledDevice->{LEDTYPE} eq 'RGBWW');
     $timeFrom = gettimeofday();
     Log3 ($ledDevice, 5, "$ledDevice->{NAME} prepare start hsv transition (is actual) hsv $hueFrom, $satFrom, $valFrom, $timeFrom");
   }
 
   Log3 ($ledDevice, 4, "$ledDevice->{NAME} current HSV $hueFrom, $satFrom, $valFrom");
-  Log3 ($ledDevice, 3, "$ledDevice->{NAME} set HSV $hue, $sat, $val with ramp: $ramp, flags: ". $flags);
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} set HSV $hue, $sat, $val with ramp: $ramp, cw $coldw ww $warmw flags: ". $flags);
 
   # if there is no ramp we dont need transition
   if (($ramp || 0) == 0)
   {
     Log3 ($ledDevice, 4, "$ledDevice->{NAME} hsv transition without ramp routed to direct settings, hsv $hue, $sat, $val");
     $ledDevice->{helper}->{targetTime} = $timeFrom;
-    return WifiLight_HighLevelCmdQueue_Add($ledDevice, $hue, $sat, $val, undef, $delay, 100, $event, $timeFrom);
+   # return WifiLight_HighLevelCmdQueue_Add($ledDevice, $hue, $sat, $val, undef, $delay, 100, $event, $timeFrom);
+    return WifiLight_HighLevelCmdQueue_Add($ledDevice, $hue, $sat, $val, undef, $delay, 100, $event, $timeFrom, $warmw, $coldw);
   }
 
   # calculate the left and right turn length based
@@ -2766,22 +3904,26 @@ WifiLight_HSV_Transition(@)
 sub
 WifiLight_SetHSV_Target(@)
 {
-  my ($ledDevice, $hue, $sat, $val) = @_;
+  my ($ledDevice, $hue, $sat, $val, $warmw, $coldw) = @_;
   $ledDevice->{helper}->{targetHue} = $hue;
   $ledDevice->{helper}->{targetSat} = $sat;
   $ledDevice->{helper}->{targetVal} = $val;
+  $ledDevice->{helper}->{targetWarmw} = $warmw if ($ledDevice->{LEDTYPE} eq 'RGBWW');
+  $ledDevice->{helper}->{targetColdw} = $coldw if ($ledDevice->{LEDTYPE} eq 'RGBWW');
   return undef;
 }
 
 sub
 WifiLight_setHSV_Readings(@)
 {
-  my ($ledDevice, $hue, $sat, $val) = @_;
+  my ($ledDevice, $hue, $sat, $val, $warmw, $coldw) = @_;
   my ($r, $g, $b) = WifiLight_HSV2RGB($hue, $sat, $val);
   readingsBeginUpdate($ledDevice);
   readingsBulkUpdate($ledDevice, "hue", $hue % 360);
   readingsBulkUpdate($ledDevice, "saturation", $sat);
   readingsBulkUpdate($ledDevice, "brightness", $val);
+  readingsBulkUpdate($ledDevice, "warmwhite", $warmw) if ($ledDevice->{LEDTYPE} eq 'RGBWW');
+  readingsBulkUpdate($ledDevice, "coldwhite", $coldw) if ($ledDevice->{LEDTYPE} eq 'RGBWW');  
   readingsBulkUpdate($ledDevice, "RGB", sprintf("%02X%02X%02X",$r,$g,$b));
   readingsBulkUpdate($ledDevice, "state", "on") if ($val > 0);
   readingsBulkUpdate($ledDevice, "state", "off") if ($val == 0);
@@ -2845,6 +3987,9 @@ WifiLight_RGB2HSV(@)
   my $r = hex substr($in, 0, 2);
   my $g = hex substr($in, 2, 2);
   my $b = hex substr($in, 4, 2);
+  #Read Values for Warmwhite and Coldwhite if LEDType is RGBWW
+  my $ww = hex substr($in, 6, 2) if ($ledDevice->{LEDTYPE} eq 'RGBWW');
+  my $cw = hex substr($in, 8, 2) if ($ledDevice->{LEDTYPE} eq 'RGBWW');
   my ($max, $min, $delta);
   my ($h, $s, $v);
 
@@ -2859,6 +4004,7 @@ WifiLight_RGB2HSV(@)
   $delta = $max - $min;
 
   my $currentHue = ReadingsVal($ledDevice->{NAME}, "hue", 0);
+  return ($currentHue, 0, $v, $ww, $cw) if ($ledDevice->{LEDTYPE} eq 'RGBWW') && (($max == 0) || ($delta == 0));
   return ($currentHue, 0, $v) if (($max == 0) || ($delta == 0));
 
   $s = int((($delta / $max) *100) + 0.5);
@@ -2867,6 +4013,8 @@ WifiLight_RGB2HSV(@)
   $h = 4 + ($r - $g) / $delta if ($b == $max);
   $h = int(($h * 60) + 0.5);
   $h += 360 if ($h < 0);
+
+  return $h, $s, $v, $ww, $cw if ($ledDevice->{LEDTYPE} eq 'RGBWW');
   return $h, $s, $v;
 }
 
@@ -3065,17 +4213,20 @@ WifiLight_CreateGammaMapping(@)
 sub
 WifiLight_HighLevelCmdQueue_Add(@)
 {
-  my ($ledDevice, $hue, $sat, $val, $ctrl, $delay, $progress, $event, $targetTime) = @_;
+  my ($ledDevice, $hue, $sat, $val, $ctrl, $delay, $progress, $event, $targetTime, $warmw, $coldw) = @_;
   my $cmd;
 
   $cmd->{hue} = $hue;
   $cmd->{sat} = $sat;
   $cmd->{val} = $val;
+  # $cmd->{k} = $k;
   $cmd->{ctrl} = $ctrl;
   $cmd->{delay} = $delay;
   $cmd->{progress} = $progress;
   $cmd->{event} = $event;
   $cmd->{targetTime} = $targetTime;
+  $cmd->{warmwhite} = $warmw if ($ledDevice->{LEDTYPE} eq 'RGBWW');
+  $cmd->{coldwhite} = $coldw if ($ledDevice->{LEDTYPE} eq 'RGBWW');
   $cmd->{inProgess} = 0;
 
   push @{$ledDevice->{helper}->{hlCmdQueue}}, $cmd;
@@ -3128,8 +4279,9 @@ WifiLight_HighLevelCmdQueue_Exec(@)
     my $isLast = (@{$ledDevice->{helper}->{hlCmdQueue}} == 1)?1:undef;
     if (($ledDevice->{helper}->{llLock} == 0) || $isLast)
     {
-      Log3 ($ledDevice, 4, "$ledDevice->{NAME} high level cmd queue exec hsv $actualCmd->{hue}, $actualCmd->{sat}, $actualCmd->{val}, delay $actualCmd->{delay}, hl qlen ".@{$ledDevice->{helper}->{hlCmdQueue}}.", ll qlen ".@{$ledDevice->{helper}->{llCmdQueue}}.", lock ".$ledDevice->{helper}->{llLock});
-      WifiLight_setHSV($ledDevice, $actualCmd->{hue}, $actualCmd->{sat}, $actualCmd->{val}, $isLast);
+      Log3 ($ledDevice, 4, "$ledDevice->{NAME} high level cmd queue exec hsv $actualCmd->{hue}, $actualCmd->{sat}, $actualCmd->{val}, $actualCmd->{warmwhite}, $actualCmd->{coldwhite}, delay $actualCmd->{delay}, hl qlen ".@{$ledDevice->{helper}->{hlCmdQueue}}.", ll qlen ".@{$ledDevice->{helper}->{llCmdQueue}}.", lock ".$ledDevice->{helper}->{llLock});
+      WifiLight_setHSV($ledDevice, $actualCmd->{hue}, $actualCmd->{sat}, $actualCmd->{val}, $isLast, $actualCmd->{warmwhite}, $actualCmd->{coldwhite}) if ($ledDevice->{LEDTYPE} eq 'RGBWW');;
+      WifiLight_setHSV($ledDevice, $actualCmd->{hue}, $actualCmd->{sat}, $actualCmd->{val}, $isLast) if ($ledDevice->{LEDTYPE} ne 'RGBWW');      
     }
     else
     {
@@ -3253,7 +4405,7 @@ WifiLight_LowLevelCmdQueue_Send(@)
   my $dbgStr = unpack("H*", $actualCmd->{command});
   Log3 ($ledDevice, 5, "$ledDevice->{NAME} low level cmd queue qlen ".@{$ledDevice->{helper}->{llCmdQueue}}.", send $dbgStr");
 
-  # TCP LW12
+  # TCP
   if ($ledDevice->{PROTO})
   {
     if (!$ledDevice->{helper}->{SOCKET} || ($ledDevice->{helper}->{SELECT}->can_read(0.0001) && !$ledDevice->{helper}->{SOCKET}->recv(my $data, 512)))
@@ -3287,29 +4439,1305 @@ WifiLight_LowLevelCmdQueue_Send(@)
 1;
 
 =begin html
-<a name="Wifilight"></a>
-This module is the interface to several WiFi Controller which are connected to the network using a Wifi connection. It could be used for the following devices:
- <ul>
-  <li>Mi-Light</li>
-  <li>Limitless</li>
-  <li>IVY</li>
-  <li>LW12</li>
-  <li>LD382</li>
-  <li>LED stripes</li>
-  <li>E27 RGB bulbs</li>
+
+<a name="WifiLight"></a>
+<h3>WifiLight</h3>
+<ul>
+  <p>The module controls a large number of different "no name" LED types and provide a consistent interface.</p>
+  <p>Following types will be supported:</p> 
+
+  <!-- <table rules="all" cellpadding="6" style="border:solid 1px;"> -->
+  <table>
+	  <thead align="left">
+		  <tr>
+			  <th>
+			  type / bridge
+			  </th>
+			  <th>
+			  type
+			  </th>
+			  <th>
+			  note
+			  </th>
+			  <th>
+			  define signature
+			  </th>
+		  </tr>
+	  </thead>
+	  <tbody>
+		  <tr>
+			  <td>
+			  Milight RGB first generation
+			  </td>
+			  <td>
+			  E27, stripe controller
+			  </td>
+			  <td>
+			  *(1,2,a,C)
+			  </td>
+			  <td>
+			  RGB bridge-V2|3
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  Milight RGBW1 first generation
+			  </td>
+			  <td>
+			  RGBW stripe controller
+			  </td>
+			  <td>
+			  *(1,2,a)
+			  </td>
+			  <td>
+			  RGBW1 bridge-V2|3
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  Milight Dual White
+			  </td>
+			  <td>
+			  E14, E27, GU10, stripe controller, Downlight
+			  </td>
+			  <td>
+			  *(1,2,b,W,nK)
+			  </td>
+			  <td>
+			  White bridge-V2|3
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  Milight RGBW2 second generation
+			  </td>
+			  <td>
+			  E14, E27, GU10, stripe controller, Downlight
+			  </td>
+			  <td>
+			  *(2,b,CW,S20)
+			  </td>
+			  <td>
+			  RGBW2 bridge-V3
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  LW12 first generation (SSID LEDNet...)
+			  </td>
+			  <td>
+			  RGB stripe controller
+			  </td>
+			  <td>
+			  &nbsp;
+			  </td>
+			  <td>
+			  RGB LW12
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  LW12HX (SSID HX...)
+			  </td>
+			  <td>
+			  RGB stripe controller
+			  </td>
+			  <td>
+			  &nbsp;
+			  </td>
+			  <td>
+			  RGB LW12HX
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  LW12FC (SSID FC...)
+			  </td>
+			  <td>
+			  RGB stripe controller
+			  </td>
+			  <td>
+			  &nbsp;
+			  </td>
+			  <td>
+			  RGB LW12FC
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  LD316 in RGB mode
+			  </td>
+			  <td>
+			  E27
+			  </td>
+			  <td>
+			  &nbsp;
+			  </td>
+			  <td>
+			  RGB LD316
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  LD316 in RGBW mode
+			  </td>
+			  <td>
+			  E27
+			  </td>
+			  <td>
+			  *(S20)
+			  </td>
+			  <td>
+			  RGBW LD316
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  LD316A in RGBW mode
+			  </td>
+			  <td>
+			  E27
+			  </td>
+			  <td>
+			  *(S20)
+			  </td>
+			  <td>
+			  RGBW LD316A
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  LD686 in RGBW mode
+			  </td>
+			  <td>
+			  E27
+			  </td>
+			  <td>
+			  *(S20)
+			  </td>
+			  <td>
+			  RGBW LD686
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  LD382 in RGB mode
+			  </td>
+			  <td>
+			  RGB stripe controller
+			  </td>
+			  <td>
+			  &nbsp;
+			  </td>
+			  <td>
+			  RGB LD382
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  LD382 in RGBW mode
+			  </td>
+			  <td>
+			  RGBW stripe controller
+			  </td>
+			  <td>
+			  &nbsp;
+			  </td>
+			  <td>
+			  RGBW LD382
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  LD382A (FW 1.0.6+) in RGB mode
+			  </td>
+			  <td>
+			  RGB stripe controller
+			  </td>
+			  <td>
+			  &nbsp;
+			  </td>
+			  <td>
+			  RGB LD382
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  LD382A (FW 1.0.6+) in RGBW mode
+			  </td>
+			  <td>
+			  RGBW stripe controller
+			  </td>
+			  <td>
+			  &nbsp;
+			  </td>
+			  <td>
+			  RGBW LD382
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  SENGLED
+			  </td>
+			  <td>
+			  E27 bulb with build-in WLAN repeater
+			  </td>
+			  <td>
+			  &nbsp;
+			  </td>
+			  <td>
+			  White Sengled
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  SUNRICHER with RGBW
+			  </td>
+			  <td>
+			  Controller
+			  </td>
+			  <td>
+			  *(!!!)
+			  </td>
+			  <td>
+			  RGBW Sunricher
+			  </td>
+		  </tr>
+	  </tbody>
+  </table>
+
+  <p>
+  <small>
+  (1) milght brigbe V2, V3, V4<br />
+  (2) milight bridge V3, V4<br />
+  (a) one group per bridge<br />
+  (b) four independent group per bridge<br />
+  (nK) no color temp support (Kelvin)<br />
+  (C) pure color<br />
+  (W) pure white<br />
+  (CW) pure Color or pure white<br />
+  (S20) Saturation &lt;20: switch to pure white channel<br />
+  (!!!) EXPERIMENTAL<br />
+  </p>
+  </small>
+  <p>
+  <table>
+    <tr>
+      <td>
+        <p><b>Color</b></p>
+        <p>Colors can be specified in RGB or HSV color space.</p>
+        <p>Color in <a name="WifiLight_Farbraum_HSV"><b>color space "HSV"</b></a> are completely and generally more intuitive than RGB.</p> 
+        <p><b>H</b> (HUE: 0..360) are the basic color in a color wheel.
+          <ul>
+            <li>Red is at 0 °</li>
+            <li>Green at 120 °</li>
+            <li> Blue at 240 °</li>
+          </ul>
+        </p> 
+        <p><b>S</b> (Saturation: 0..100) stands for the saturation of the color. A saturation of 100 means the color is "pure" or completely saturated. Blue, for example, with 100% saturation corresponds to RGB # 0000FF.</p>
+        <p><b>V</b> (Value: 0..100) indicates the brightness. A value of 50 states that "half brightness".</p>
+      </td>
+      <td>
+        <a name="WifiLight_Farbkreis">
+          <svg style="width:450px; height:320px;"  viewBox="-100 -30 500 320">
+            <linearGradient id="linearColors1" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#FF0000"></stop>
+              <stop offset="100%" stop-color="#FFFF00"></stop>
+            </linearGradient>
+            <linearGradient id="linearColors2" x1="0.5" y1="0" x2="0.5" y2="1">
+               <stop offset="0%" stop-color="#FFFF00"></stop>
+               <stop offset="100%" stop-color="#00FF00"></stop>
+            </linearGradient>
+            <linearGradient id="linearColors3" x1="1" y1="0" x2="0" y2="1">
+               <stop offset="0%" stop-color="#00FF00"></stop>
+               <stop offset="100%" stop-color="#00FFFF"></stop>
+            </linearGradient>
+            <linearGradient id="linearColors4" x1="1" y1="1" x2="0" y2="0">
+               <stop offset="0%" stop-color="#00FFFF"></stop>
+               <stop offset="100%" stop-color="#0000FF"></stop>
+            </linearGradient>
+            <linearGradient id="linearColors5" x1="0.5" y1="1" x2="0.5" y2="0">
+               <stop offset="0%" stop-color="#0000FF"></stop>
+               <stop offset="100%" stop-color="#FF00FF"></stop>
+            </linearGradient>
+            <linearGradient id="linearColors6" x1="0" y1="1" x2="1" y2="0">
+               <stop offset="0%" stop-color="#FF00FF"></stop>
+               <stop offset="100%" stop-color="#FF0000"></stop>
+            </linearGradient>
+            <linearGradient id="linearColors7" x1="152" y1="130" x2="152" y2="35" gradientUnits="userSpaceOnUse">
+               <stop offset="0.2" stop-color="#FFFFFF"></stop>
+               <stop offset="1" stop-color="#FF0000"></stop>
+            </linearGradient>
+            <linearGradient id="linearColors8" x1="152" y1="130" x2="230" y2="190" gradientUnits="userSpaceOnUse">
+               <stop offset="0.2" stop-color="#FFFFFF"></stop>
+               <stop offset="1" stop-color="#00FF00"></stop>
+            </linearGradient>
+            <linearGradient id="linearColors9" x1="152" y1="130" x2="70" y2="190" gradientUnits="userSpaceOnUse">
+               <stop offset="0.2" stop-color="#FFFFFF"></stop>
+               <stop offset="1" stop-color="#0000FF"></stop>
+            </linearGradient>
+            <marker id="markerArrow" markerWidth="13" markerHeight="13" refX="2" refY="6" orient="auto">
+              <path d="M2,2 L2,11 L10,6 L2,2" style="fill:grey;" />
+            </marker>
+            <path d="M150 10 a120 120 0 0 1 103.9230 60" fill="none" stroke="url(#linearColors1)" stroke-width="20" />
+            <path d="M253.9230 70 a120 120 0 0 1 0 120" fill="none" stroke="url(#linearColors2)" stroke-width="20" />
+            <path d="M253.9230 190 a120 120 0 0 1 -103.9230 60" fill="none" stroke="url(#linearColors3)" stroke-width="20" />
+            <path d="M150 250 a120 120 0 0 1 -103.9230 -60" fill="none" stroke="url(#linearColors4)" stroke-width="20" />
+            <path d="M46.077 190 a120 120 0 0 1 0 -120" fill="none" stroke="url(#linearColors5)" stroke-width="20" />
+            <path d="M46.077 70 a120 120 0 0 1 103.9230 -60" fill="none" stroke="url(#linearColors6)" stroke-width="20" />
+            <path d="M150,50 C250,50 250,180 180,200" fill="none" stroke="grey" stroke-width="2"  marker-end="url(#markerArrow)" />
+            <text class="Label" x="126" y="208">HUE</text>
+            <line x1="152" y1="130" x2="152" y2="35" stroke="url(#linearColors7)" stroke-width="4" />
+            <line x1="136" y1="120" x2="136" y2="45" stroke="grey" stroke-width="2" marker-end="url(#markerArrow)" />
+            <text class="Label" x="96" y="96">SAT</text>
+            <line x1="152" y1="130" x2="230" y2="190" stroke="url(#linearColors8)" stroke-width="4" />
+            <line x1="152" y1="130" x2="70" y2="190" stroke="url(#linearColors9)" stroke-width="4" />
+            <text x="120" y="-10">0° (Red)</text>
+            <text x="270" y="60">60° (Yellow)</text>
+            <text x="270" y="220">120° (Green)</text>
+            <text x="110" y="285">180° (Cyan)</text>
+            <text x="-60" y="220">240° (Blue)</text>
+            <text x="-90" y="60">300° (Magenta)</text>
+          </svg>
+        </a>
+      </td>
+    </tr>
+  </table>
+  </p>
+  <p>
+  <b>Color: HSV compared to RGB</b>
+  <p>
+    Normally, a color may be expressed in the HSV color space as well as in RGB color space.
+  <p>
+    Colors in the HSV color space usually seem more understandable. 
+    To move a Green in the HSV color space a little more toward CYAN, simply increase the HUE value (angle) slightly. 
+    In RGB color space, the same task is less intuitive to achieve by increasing blue.
+  <p>
+    Differences become clear in Transitions however.
+    In order to dim BLUE up the HSV Transitions 240,100,0 -> 240,100,100 would be used. 
+    To slowly dim RED (brightness 0) to BLUE the Transition in the HSV color space is 0,100,0 -> 240,100,100.
+    In RGB color space (# 000000 -> # 0000FF) can not distinguish between the two versions.
+    Here (correctly, but probably differently than intended) would appear in both cases, a white (brightness 0) as an initial value.
+  </p>
+
+  <p><b>Define</b></p>
+  <ul>
+    <li>
+      <p><code>define &lt;name&gt; WifiLight &lt;LED type&gt; &lt;bridgetype&gt;:&lt;IP|FQDN&gt;</code></p>
+      <p>
+      <i><u>example</u></i>
+      <ul>
+        <p>
+        <i>defines a milight RGBW2 (bulb or LED stripe controller) on a milight bridge version 3 or 4.
+        The LED is allocated to a maximum of 4 groups available per bridge in order of definition:</i>
+        <br/>
+        <code>define wz.licht.decke WifiLight RGBW2 bridge-V3:192.168.178.142</code>
+      </ul>
+      <ul>
+        <p>
+        <i>defines a LD382A Controller with RGBW stripe:</i>
+        <br/>
+        <code>define wz.licht.decke WifiLight RGBW LD382A:192.168.178.142</code>
+      </ul>    
+      <ul>
+        <p>
+        <i>defines a LD382A Controller with RGB stripe:</i>
+        <br/>
+        <code>define wz.licht.decke WifiLight RGB LD382A:192.168.178.142</code>
+      </ul>
+      <p>WifiLight has a <a href="#WifiLight_Farbkalibrierung">"color calibration"</a>. Ideally, a calibration should be performed every time after a lamp change or after definition.</p>
+    </ul>
+  </li>
+  <p><b>Set</b></p>
+  <ul>
+    <li>
+      <p><code>set &lt;name&gt; <b>on</b> [ramp]</code></p>
+      <p>Turns on the device. It is either chosen 100% White or the color defined by the attribute "default color".
+      <p>Advanced options:
+        <ul>
+          <li>ramp</li>
+        </ul>
+      </p>
+    </li>
+    <li>
+      <p><code>set &lt;name&gt; <b>off</b> [ramp]</code></p>
+      <p>Turns of the device.
+      <p>Advanced options:
+        <ul>
+          <li>ramp</li>
+        </ul>
+      </p>
+    </li>
+    <li>
+      <p><code>set &lt;name&gt; <b>dimup</b></code></p>
+      <p>Increases the brightness by a fixed amount. The attribute "dimStep" or the default "7" is applied.<br />
+      This command is useful to increase particularly the brightness by a wall switch or a remote control.
+      <p>Advanced options:
+        <ul>
+          <li>none</li>
+        </ul>
+      </p>
+    </li>
+    <li>
+      <p><code>set &lt;name&gt; <b>dimdown</b></code></p>
+      <p>Decreases the brightness by a fixed amount. The attribute "dimStep" or the default "7" is applied.<br />
+      This command is useful to reduce particularly the brightness by a wall switch or a remote control.
+      <p>Advanced options:
+        <ul>
+          <li>none</li>
+        </ul>
+      </p>
+    </li>
+    <li>  
+      <p><code>set &lt;name&gt; <b>dim</b> level [ramp] [q]</code></p>
+      <p>Sets the brightness to the specified level (0..100).
+      This command also maintains the preset color even with "dim 0" (off) and then "dim xx" (turned on) at. 
+      Therefore, it represents an alternative form to "off" / "on". The latter would always choose the "default color".
+      <p>Advanced options:
+        <ul>
+          <li>ramp</li>
+        </ul>
+      </p>
+      <p>Flags:
+        <ul>
+          <li>q</li>
+        </ul>
+      </p>
+    </li>
+    <li>
+      <p><code>set &lt;name&gt; <b>HSV</b> H,S,V [ramp] [s|l|q] [event]</code></p>
+      <p>Sets the color in the <a href="#WifiLight_Farbraum_HSV">HSV color space</a>. If the ramp is specified (as a time in seconds), the module calculates a soft color transition from the current color to the newly set.
+      <ul><i>For example, sets a saturated blue with half brightness:</i><br /><code>set wz.licht.decke HSV 240,100,50</code></ul>
+      <p>Advanced options:
+        <ul>
+          <li>ramp</li>
+        </ul>
+      </p>
+      <p>Flags:
+        <ul>
+          <li>s l q event</li>
+        </ul>
+      </p>
+    </li>
+    <li>
+      <p><code>set &lt;name&gt; <b>RGB</b> RRGGBB [ramp] [l|s|q] [event]</code></p>
+      <p>Sets the color in the RGB color space.
+      <p>Advanced options:
+        <ul>
+          <li>ramp</li>
+        </ul>
+      </p>
+      <p>Flags:
+        <ul>
+          <li>s l q event</li>
+        </ul>
+      </p>
+    </ul>
+  </li>
+  <p><b>Meaning of Flags</b></p>
+  Certain commands (set) can be marked with special flags.
+  <p>
+  <ul>
+    <li>ramp: 
+      <ul>
+        Time in seconds for a soft color or brightness transition. The soft transition starts at the currently visible color and is calculated for the specified.
+      </ul>
+    </li>
+    <li>s: 
+      <ul>
+        (short, default). A smooth transition to another color is carried out in the <a href="#WifiLight_Farbkreis">"color wheel"</a> on the shortest path. 
+        A transition from red to green lead by the shortest route through yellow.
+      </ul>
+    </li>
+    <li>l: 
+      <ul>
+        (long). A smooth transition to another color is carried out in the <a href="#WifiLight_Farbkreis">"color wheel"</a> on the "long" way.
+        A transition from red to green then leads across magenta, blue, and cyan.
+      </ul>
+    </li>
+    <li>q: 
+      <ul>
+        (queue). Commands with this flag are cached in an internal queue and will not run before the currently running soft transitions have been processed. 
+        Commands without the flag will be processed immediately. In this case all running transitions are stopped immediately and the queue will be cleared.
+      </ul>
+    </li>
+    <li>event: 
+      <ul>
+        designator ([A-Za-z_0-9])
+        <p>
+          WifiLight creates, when using this flag, during transitions to another color messages (events) in the form:
+        <p>
+        <code>WifiLight &ltNAME&gt programm: &ltEVENT&gt &ltXX&gt</code>.
+        <p>
+        &ltEVENT&gt is the designator as specified in the flag.<br/>
+        &ltXX&gt is the progress (percentage) of the transition.<br/>
+        <p>
+        Depending on the total duration of the transition, the values from 0 to 100 will not completely go through but for 0% and 100% is guaranteed always a event. 
+        To these events can then be reacted within a notify or DOIF to (for example):
+        <ul>
+          <li>increase the volume of a radio when a lamp is turned on in the morning slowly</li>
+          <li>A color transition can be restarted in a notify if it is complete (loop it, even complex transitions)</li>
+          <li>Other light sources can be synchronized by individually created color transitions.</li>
+        </ul>
+      </ul>
+    </li>
+  </ul>
+  <p><b><a name="WifiLight_Farbkalibrierung"></a>color calibration</b></p>
+  WifiLight supports two different types of color calibrations:
+  <ul>
+    <p>
+    <b>Correction of saturated colors</b>
+    <p>
+    background:
+    <p>
+      YELLOW, for example, is defined as a mixture of red and green light in equal parts.
+      Depending on the LED and control used the green channel may be much more luminous.
+      If the red and green LEDs are each fully driven, GREEN predominates in this mixture and the desired YELLOW would get a distinct green tint.
+      In this example, no yellow would be generated (corresponding to 60 ° in the <a href="#WifiLight_Farbkreis">"color wheel"</a>) for HSV 60,100,100. 
+      Instead GREEN would be generated with yellow tinge, perhaps corresponding to an estimated color angle of 80 °. 
+      The required correction for yellow would therefore minus 20° (60° target - 80° result = -20° correction). 
+      YELLOW may have to be corrected as to -20 °. Possible values per correction point are +/- 29 °.
+    <p>
+    procedure:
+    <p>
+      The correction of the full color is controlled by the attribute "color cast". 
+      Here 6 (comma separated) values are specified in the range from -29 to 29. 
+      These values are in accordance with the angle correction for red (0 °), yellow (60 °), green (120 °), cyan (180 °), blue (240 °) and magenta (300 °). 
+      First, the deviation of the mixed colors (60 ° / 180 ° / 300 °) should be determined as in the above example, and stored in the attribute. 
+      Following the primary colors (0 ° / 120 ° / 240 °) should be corrected so that the smooth transitions between adjacent pure colors appear as linear as possible. 
+      This process may need to be repeated iteratively multiple times until the result is harmonious.
+    <p>
+    <b>White Balance</b>
+    <p>
+    background:
+    <p>
+    Some bulbs produce white light by mixing the RGB channels (for example, LW12). 
+    Depending on the light intensity of the RGB channels of the LED strips used, the result is different. 
+    One or two colors dominate. 
+    In addition, there are various types of white light. 
+    Cold light has a higher proportion of blue. 
+    In Central Europe mostly warm white light is used for light sources. 
+    This has a high red and low blue component.
+    <p>
+    WifiLight offers the possibility for mixed RGB white to adapt the composition. 
+    The adjustment is carried out via the attribute "white point". 
+    The attribute expects a value between 0 and 1 (decimal point with) and the three colors are separated by a comma for each of the three RGB channels.
+    <p>
+    procedure:
+    <p>
+    A value of "1,1,1" sets all the three channels to 100% each. 
+    Assuming that the blue component of the white light should be reduced, a value of "1,1,0.5" sets the third channel (BLUE) in white on 0.5 according to 50%. 
+    Before doing a white balance correction the adjusment of the saturated color should be completed.
+  </ul>
+  <p><b>Attribute</b></p>
+  <ul>
+    <li>
+      <code>attr &ltname&gt <b>colorCast</b> &ltR,Y,G,C,B,M&gt</code>
+      <p>   
+      <a href="#WifiLight_Farbkalibrierung">color calibration</a> of saturated colors.
+      R(ed), Y(ellow), G(reen), C(yan), B(lue), M(agenta) in the range of +/- 29 (degrees)
+    </li>
+    <li>
+      <code>attr &ltname&gt <b>defaultColor</b> &ltH,S,V&gt</code>
+      <p>   
+      Specify the light color in HSV which is selected at "on". Default is white.
+    </li>
+    <li>
+      <code>attr &ltname&gt <b>defaultRamp</b> &lt0 bis X&gt</code>
+      <p>   
+      Time in seconds. If this attribute is set, a smooth transition is always implicitly generated if no ramp in the set is indicated.
+    </li>
+    <li>
+      <code>attr &ltname&gt <b>dimStep</b> &lt0 bis 100&gt</code>
+      <p>   
+      Value by which the brightness at dim up and dim-down is changed. Default is "7"
+    </li>
+    <li>
+      <code>attr &ltname&gt <b>gamma</b> &ltX.X&gt</code>
+      <p>   
+        The human eye perceives brightness changes very differently to (logarithmic). 
+        At low output brightness even a small change in brightness is perceived as very strong and on the other side strong changes are needed at high luminance. 
+        Therefore, a logarithmic correction of brightness increase of lamps is necessary so that the increase is found to be uniform. 
+        Some controllers perform this correction internally. 
+        In other cases it is necessary to store this correction in the module. 
+        A gamma value of 1.0 (default) results in a linear output values. 
+        Values less than 1.0 lead to a logarithmic correction.
+    </li>
+    <li>
+      <code>attr &ltname&gt <b>whitePoint</b> &ltR,G,B&gt</code>
+      <p>   
+      <a href="#WifiLight_Farbkalibrierung">color calibration</a> for mixed RGB white light.
+    </li>
+    <li>
+      <code>attr &ltname&gt <b><a href="#readingFnAttributes">readingFnAttributes</a></b></code>
+    </li>
+  </ul>
+  <p><b>Colored device-icon for FhemWeb</b>
+  <ul>
+    <p>
+    To activate a colored icon for <a href="#FHEMWEB">FhemWeb</a> the following attribute must be set:
+    <p>
+    <li>
+      <code>attr &ltname&gt <b>devStateIcon</b> {Color_devStateIcon(ReadingsVal($name,"RGB","000000"))}</code>
+    </li>
+  </ul>
+  <p><b>Colorpicker for FhemWeb</b>
+  <ul>
+    <p>
+    In order for the Color Picker can be used in <a href="#FHEMWEB">FhemWeb</a> following attributes need to be set:
+    <p>
+    <li>
+      <code>attr &ltname&gt <b>webCmd</b> RGB</code>
+    </li>
+    <li>
+      <code>attr &ltname&gt <b>widgetOverride</b> RGB:colorpicker,RGB</code>
+    </li>
+  </ul>
 </ul>
+
 =end html
 
 =begin html_DE
-<a name="Wifilight"></a>
-Diese Modul kann dazu verwendet werden um Wifi-LED Controller zu steuern die mit dem Netzwerk ueber das WLAN verbunden sind. Die folgenden Geraete werden zur Zeit unterstuetzt:
- <ul>
-  <li>Mi-Light</li>
-  <li>Limitless</li>
-  <li>IVY</li>
-  <li>LW12</li>
-  <li>LD382</li>
-  <li>LED stripes</li>
-  <li>E27 RGB bulbs</li>
+
+<a name="WifiLight"></a>
+<h3>WifiLight</h3>
+<ul>
+  <p>Das Modul steuert eine gro&szlig;e Anzahl unterschiedlicher &quot;no name&quot; LED Typen und stellt Ihnen einheitliches Interface zur Verf&uuml;gung.</p>
+  <p>Folgende Typen werden unterstützt:</p> 
+
+  <!-- <table rules="all" cellpadding="6" style="border:solid 1px;"> -->
+  <table>
+	  <thead align="left">
+		  <tr>
+			  <th>
+			  Leuchtmitteltyp / bridge
+			  </th>
+			  <th>
+			  Type
+			  </th>
+			  <th>
+			  Notiz
+			  </th>
+			  <th>
+			  Signatur im define
+			  </th>
+		  </tr>
+	  </thead>
+	  <tbody>
+		  <tr>
+			  <td>
+			  Milight RGB erste Generation
+			  </td>
+			  <td>
+			  E27, stripe controller
+			  </td>
+			  <td>
+			  *(1,2,a,C)
+			  </td>
+			  <td>
+			  RGB bridge-V2|3
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  Milight RGBW1 erste Generation
+			  </td>
+			  <td>
+			  RGBW stripe controller
+			  </td>
+			  <td>
+			  *(1,2,a)
+			  </td>
+			  <td>
+			  RGBW1 bridge-V2|3
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  Milight White
+			  </td>
+			  <td>
+			  E14, E27, GU10, stripe controller, Downlight
+			  </td>
+			  <td>
+			  *(1,2,b,W,nK)
+			  </td>
+			  <td>
+			  White bridge-V2|3
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  Milight RGBW2 zweite Generation
+			  </td>
+			  <td>
+			  E14, E27, GU10, stripe controller, Downlight
+			  </td>
+			  <td>
+			  *(2,b,CW,S20)
+			  </td>
+			  <td>
+			  RGBW2 bridge-V3
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  LW12 erste Generation (SSID LEDNet...)
+			  </td>
+			  <td>
+			  RGB stripe controller
+			  </td>
+			  <td>
+			  &nbsp;
+			  </td>
+			  <td>
+			  RGB LW12
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  LW12HX (SSID HX...)
+			  </td>
+			  <td>
+			  RGB stripe controller
+			  </td>
+			  <td>
+			  &nbsp;
+			  </td>
+			  <td>
+			  RGB LW12HX
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  LW12FC (SSID FC...)
+			  </td>
+			  <td>
+			  RGB stripe controller
+			  </td>
+			  <td>
+			  &nbsp;
+			  </td>
+			  <td>
+			  RGB LW12FC
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  LD316 im RGB mode
+			  </td>
+			  <td>
+			  E27
+			  </td>
+			  <td>
+			  &nbsp;
+			  </td>
+			  <td>
+			  RGB LD316
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  LD316 im RGBW mode
+			  </td>
+			  <td>
+			  E27
+			  </td>
+			  <td>
+			  *(S20)
+			  </td>
+			  <td>
+			  RGBW LD316
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  LD316A im RGBW mode
+			  </td>
+			  <td>
+			  E27
+			  </td>
+			  <td>
+			  *(S20)
+			  </td>
+			  <td>
+			  RGBW LD316A
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  LD686 im RGBW mode
+			  </td>
+			  <td>
+			  E27
+			  </td>
+			  <td>
+			  *(S20)
+			  </td>
+			  <td>
+			  RGBW LD686
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  LD382 im RGB mode
+			  </td>
+			  <td>
+			  RGB stripe controller
+			  </td>
+			  <td>
+			  &nbsp;
+			  </td>
+			  <td>
+			  RGB LD382
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  LD382 im RGBW mode
+			  </td>
+			  <td>
+			  RGBW stripe controller
+			  </td>
+			  <td>
+			  &nbsp;
+			  </td>
+			  <td>
+			  RGBW LD382
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  LD382A (FW 1.0.6) im RGB mode
+			  </td>
+			  <td>
+			  RGB stripe controller
+			  </td>
+			  <td>
+			  &nbsp;
+			  </td>
+			  <td>
+			  RGB LD382
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  LD382A (FW 1.0.6) im RGBW mode
+			  </td>
+			  <td>
+			  RGBW stripe controller
+			  </td>
+			  <td>
+			  &nbsp;
+			  </td>
+			  <td>
+			  RGBW LD382
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  SENGLED
+			  </td>
+			  <td>
+			  E27 mit WLAN repeater
+			  </td>
+			  <td>
+			  &nbsp;
+			  </td>
+			  <td>
+			  White Sengled
+			  </td>
+		  </tr>
+		  <tr>
+			  <td>
+			  SUNRICHER mit RGBW
+			  </td>
+			  <td>
+			  Controller
+			  </td>
+			  <td>
+			  *(!!!)
+			  </td>
+			  <td>
+			  RGBW Sunricher
+			  </td>
+		  </tr>
+	  </tbody>
+  </table>
+
+  <p>
+  <small>
+  (1) milght brigbe V2, V3, V4<br />
+  (2) milight bridge V3, V4<br />
+  (a) eine Gruppe pro bridge<br />
+  (b) vier unabh&auml;ngige Gruppen pro bridge<br />
+  (nK) kein Temperatursupport, Kelvin<br />
+  (C) rein Color<br />
+  (W) rein White<br />
+  (CW) rein Color oder White<br />
+  (S20) Saturation &lt;20: umschalten white Channel<br />
+  (!!!) EXPERIMENTAL<br />
+  </p>
+  </small>
+  <p>
+  <table>
+    <tr>
+      <td>
+        <p><b>Farbangaben</b></p>
+        <p>Farben können im RGB oder im HSV Farbraum angegeben werden.</p>
+        <p>Farbangaben im <a name="WifiLight_Farbraum_HSV"><b>Farbraum "HSV"</b></a> sind vollständig und in der Regel intuitiver als RGB.</p> 
+        <p><b>H</b> (HUE: 0..360) gibt die Grundfarbe in einem Farbkreis an. 
+          <ul>
+            <li>Rot liegt bei 0°</li>
+            <li>Grün bei 120°</li>
+            <li>Blau bei 240°</li>
+          </ul>
+        </p> 
+        <p><b>S</b> (Saturation/Sättigung: 0..100) steht für die Sättigung der Farbe. Eine Sättigung von 100 bedeutet die Farbe ist "rein" oder komplett gesättigt. Blau zum Beispiel mit 100% Sättigung entspricht RGB #0000FF.</p>
+        <p><b>V</b> (Value: 0..100) gibt die Helligkeit an. Ein V von 50 heißt: "halbe Helligkeit".</p>
+      </td>
+      <td>
+        <a name="WifiLight_Farbkreis">
+          <svg style="width:450px; height:320px;"  viewBox="-100 -30 500 320">
+            <linearGradient id="linearColors1" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#FF0000"></stop>
+              <stop offset="100%" stop-color="#FFFF00"></stop>
+            </linearGradient>
+            <linearGradient id="linearColors2" x1="0.5" y1="0" x2="0.5" y2="1">
+               <stop offset="0%" stop-color="#FFFF00"></stop>
+               <stop offset="100%" stop-color="#00FF00"></stop>
+            </linearGradient>
+            <linearGradient id="linearColors3" x1="1" y1="0" x2="0" y2="1">
+               <stop offset="0%" stop-color="#00FF00"></stop>
+               <stop offset="100%" stop-color="#00FFFF"></stop>
+            </linearGradient>
+            <linearGradient id="linearColors4" x1="1" y1="1" x2="0" y2="0">
+               <stop offset="0%" stop-color="#00FFFF"></stop>
+               <stop offset="100%" stop-color="#0000FF"></stop>
+            </linearGradient>
+            <linearGradient id="linearColors5" x1="0.5" y1="1" x2="0.5" y2="0">
+               <stop offset="0%" stop-color="#0000FF"></stop>
+               <stop offset="100%" stop-color="#FF00FF"></stop>
+            </linearGradient>
+            <linearGradient id="linearColors6" x1="0" y1="1" x2="1" y2="0">
+               <stop offset="0%" stop-color="#FF00FF"></stop>
+               <stop offset="100%" stop-color="#FF0000"></stop>
+            </linearGradient>
+            <linearGradient id="linearColors7" x1="152" y1="130" x2="152" y2="35" gradientUnits="userSpaceOnUse">
+               <stop offset="0.2" stop-color="#FFFFFF"></stop>
+               <stop offset="1" stop-color="#FF0000"></stop>
+            </linearGradient>
+            <linearGradient id="linearColors8" x1="152" y1="130" x2="230" y2="190" gradientUnits="userSpaceOnUse">
+               <stop offset="0.2" stop-color="#FFFFFF"></stop>
+               <stop offset="1" stop-color="#00FF00"></stop>
+            </linearGradient>
+            <linearGradient id="linearColors9" x1="152" y1="130" x2="70" y2="190" gradientUnits="userSpaceOnUse">
+               <stop offset="0.2" stop-color="#FFFFFF"></stop>
+               <stop offset="1" stop-color="#0000FF"></stop>
+            </linearGradient>
+            <marker id="markerArrow" markerWidth="13" markerHeight="13" refX="2" refY="6" orient="auto">
+              <path d="M2,2 L2,11 L10,6 L2,2" style="fill:grey;" />
+            </marker>
+            <path d="M150 10 a120 120 0 0 1 103.9230 60" fill="none" stroke="url(#linearColors1)" stroke-width="20" />
+            <path d="M253.9230 70 a120 120 0 0 1 0 120" fill="none" stroke="url(#linearColors2)" stroke-width="20" />
+            <path d="M253.9230 190 a120 120 0 0 1 -103.9230 60" fill="none" stroke="url(#linearColors3)" stroke-width="20" />
+            <path d="M150 250 a120 120 0 0 1 -103.9230 -60" fill="none" stroke="url(#linearColors4)" stroke-width="20" />
+            <path d="M46.077 190 a120 120 0 0 1 0 -120" fill="none" stroke="url(#linearColors5)" stroke-width="20" />
+            <path d="M46.077 70 a120 120 0 0 1 103.9230 -60" fill="none" stroke="url(#linearColors6)" stroke-width="20" />
+            <path d="M150,50 C250,50 250,180 180,200" fill="none" stroke="grey" stroke-width="2"  marker-end="url(#markerArrow)" />
+            <text class="Label" x="126" y="208">HUE</text>
+            <line x1="152" y1="130" x2="152" y2="35" stroke="url(#linearColors7)" stroke-width="4" />
+            <line x1="136" y1="120" x2="136" y2="45" stroke="grey" stroke-width="2" marker-end="url(#markerArrow)" />
+            <text class="Label" x="96" y="96">SAT</text>
+            <line x1="152" y1="130" x2="230" y2="190" stroke="url(#linearColors8)" stroke-width="4" />
+            <line x1="152" y1="130" x2="70" y2="190" stroke="url(#linearColors9)" stroke-width="4" />
+            <text x="120" y="-10">0° (Rot)</text>
+            <text x="270" y="60">60° (Gelb)</text>
+            <text x="270" y="220">120° (Grün)</text>
+            <text x="110" y="285">180° (Cyan)</text>
+            <text x="-60" y="220">240° (Blau)</text>
+            <text x="-90" y="60">300° (Magenta)</text>
+          </svg>
+        </a>
+      </td>
+    </tr>
+  </table>
+  </p>
+  <p><b>Farbangaben: HSV gegenüber RGB</b><p>
+        <p>
+        Im Normalfall kann eine Farbe im HSV Farbraum genauso wie im RGB Farbraum dargestellt werden.
+        <p>
+        Farben im HSV Farbraum wirken meist verständlicher. 
+        Um ein Grün im HSV Farbraum etwas mehr in Richtung CYAN zu bewegen wird einfach der HUE Wert (Winkel) etwas erhöht. 
+        Im RGB Farbraum ist die gleiche Aufgabe weniger intuitiv durch eine Erhöhung von BLAU zu erreichen. 
+        <p>
+        Unterschiede werden jedoch bei Transitions deutlich. 
+        Um BLAU langsam auf zu dimmen lauten die HSV Transitions 240,100,0 -> 240,100,100. 
+        Um von ROT (Helligkeit 0) langsam auf BLAU zu dimmen wird im HSV Farbraum 0,100,0 -> 240,100,100 verwendet. 
+        Im RGB Farbraum (#000000 -> #0000FF) kann nicht zwischen den beiden Varianten unterschieden werden. 
+        Hier würde (richtiger weise, vermutlich jedoch anders als beabsichtigt) in beiden Fällen ein Weiß (Helligkeit 0) als Startwert erscheinen.
+  </p>
+
+  <p><b>Define</b></p>
+  <ul>
+    <li>
+      <p><code>define &lt;name&gt; WifiLight &lt;Leuchtmitteltyp&gt; &lt;bridgetyp&gt;:&lt;IP|FQDN&gt;</code></p>
+      <p>
+      <i><u>Beispiele</u></i>
+      <ul>
+        <p>
+        <i>definiert einen milight RGBW2 Leuchtmittel (Bulb oder LED stripe controller) an einer milight bridge Version 3 oder 4. 
+        Die LED wird den maximal 4 verf&uuml;gbaren Gruppen pro bridge in der Reihenfolge der Definition zugeordnet:</i>
+        <br/>
+        <code>define wz.licht.decke WifiLight RGBW2 bridge-V3:192.168.178.142</code>
+      </ul>
+      <ul>
+        <p>
+        <i>definiert einen LD382A Controller mit RGBW Stripe:</i>
+        <br/>
+        <code>define wz.licht.decke WifiLight RGBW LD382A:192.168.178.142</code>
+      </ul>    
+      <ul>
+        <p>
+        <i>definiert einen LD382A Controller mit RGB Stripe:</i>
+        <br/>
+        <code>define wz.licht.decke WifiLight RGB LD382A:192.168.178.142</code>
+      </ul>    
+      <p>WifiLight verfügt über eine <a href="#WifiLight_Farbkalibrierung">"Farbkalibrierung"</a>. Sinnvollerweise sollte nach einem Leuchtmitteltausch oder einem define eine Kalibrierung vorgenommen werden.</p>
+    </ul>
+  </li>
+  <p><b>Set</b></p>
+  <ul>
+    <li>
+      <p><code>set &lt;name&gt; <b>on</b> [ramp]</code></p>
+      <p>Schaltet das device ein. Dabei wird entweder 100% Weiß oder die im Attribut "defaultColor" definierte Farbe gewählt.
+      <p>Erweiterte Parameter:
+        <ul>
+          <li>ramp</li>
+        </ul>
+      </p>
+    </li>
+    <li>
+      <p><code>set &lt;name&gt; <b>off</b> [ramp]</code></p>
+      <p>Schaltet das device aus.
+      <p>Erweiterte Parameter:
+        <ul>
+          <li>ramp</li>
+        </ul>
+      </p>
+    </li>
+    <li>
+      <p><code>set &lt;name&gt; <b>dimup</b></code></p>
+      <p>Erhöht die Helligkeit um einen festen Betrag. Dabei wird der im Attribut "dimStep" definierte Wert oder der Default "7" angewendet.<br>Dieser Befehl eignet sich besonders um die Helligkeit über einen Wandschalter oder eine Fernbedienung zu erhöhen.
+      <p>Erweiterte Parameter:
+        <ul>
+          <li>keine</li>
+        </ul>
+      </p>
+    </li>
+    <li>
+      <p><code>set &lt;name&gt; <b>dimdown</b></code></p>
+      <p>Verringert die Helligkeit um einen festen Betrag. Dabei wird der im Attribut "dimStep" definierte Wert oder der Default "7" angewendet.<br>Dieser Befehl eignet sich besonders um die Helligkeit über einen Wandschalter oder eine Fernbedienung zu verringern
+      <p>Erweiterte Parameter:
+        <ul>
+          <li>keine</li>
+        </ul>
+      </p>
+    </li>
+    <li>  
+      <p><code>set &lt;name&gt; <b>dim</b> level [ramp] [q]</code></p>
+      <p>Setzt die Helligkeit auf den angegebenen level (0..100).<br>Dieser Befehl behält außerdem die eingestellte Farbe auch bei "dim 0" (ausgeschaltet) und nachfolgendem "dim xx" (eingeschaltet) bei. Daher stellt er eine alternative Form zu "off" / "on" dar. Letzteres würde immer die "defaultColor" wählen.  
+      <p>Erweiterte Parameter:
+        <ul>
+          <li>ramp</li>
+        </ul>
+      </p>
+      <p>Flags:
+        <ul>
+          <li>q</li>
+        </ul>
+      </p>
+    </li>
+    <li>
+      <p><code>set &lt;name&gt; <b>HSV</b> H,S,V [ramp] [s|l|q] [event]</code></p>
+      <p>Setzt die Farbe im <a href="#WifiLight_Farbraum_HSV">HSV Farbraum</a>. Wenn die ramp (als Zeit in Sekunden) angegeben ist, berechnet das modul einen weichen Farbübergang von der aktuellen Farbe zur neu gesetzten.
+      <ul><i>Beispiel, setzt ein gesättigtes Blau mit halber Helligkeit:</i><br /><code>set wz.licht.decke HSV 240,100,50</code></ul>
+      <p>Erweiterte Parameter:
+        <ul>
+          <li>ramp</li>
+        </ul>
+      </p>
+      <p>Flags:
+        <ul>
+          <li>s l q event</li>
+        </ul>
+      </p>
+    </li>
+    <li>
+      <p><code>set &lt;name&gt; <b>RGB</b> RRGGBB [ramp] [l|s|q] [event]</code></p>
+      <p>Setzt die Farbe im RGB Farbraum. 
+      <p>Erweiterte Parameter:
+        <ul>
+          <li>ramp</li>
+        </ul>
+      </p>
+      <p>Flags:
+        <ul>
+          <li>s l q event</li>
+        </ul>
+      </p>
+    </ul>
+  </li>
+  <p><b>Bedeutung der Flags</b></p>
+  Bestimmte Befehle (set) können mit speziellen Flags versehen werden.
+  <p>
+  <ul>
+    <li>ramp: 
+      <ul>
+        Zeit in Sekunden für einen weichen Farb- oder Helligkeitsübergang. Der weiche Übergang startet bei der aktuell sichtbaren Farbe und wird zur angegeben berechnet. 
+      </ul>
+    </li>
+    <li>s: 
+      <ul>
+        (short, default). Ein weicher Übergang zu einer anderen Farbe wird im <a href="#WifiLight_Farbkreis">"Farbkreis"</a> auf dem kürzesten Weg durchgeführt.</br>
+        Eine Transition von ROT nach GRÜN führt auf dem kürzesten Weg über GELB.
+      </ul>
+    </li>
+    <li>l: 
+      <ul>
+        (long). Ein weicher Übergang zu einer anderen Farbe wird im <a href="#WifiLight_Farbkreis">"Farbkreis"</a> auf dem "langen" Weg durchgeführt.</br>
+        Eine Transition von ROT nach GRÜN führt dann über MAGENTA, BLAU, und CYAN.
+      </ul>
+    </li>
+    <li>q: 
+      <ul>
+        (queue). Kommandos mit diesem Flag werden in einer internen Warteschlange zwischengespeichert und erst ausgeführt nachdem die aktuell laufenden weichen Übergänge
+        abgearbeitet wurden. Kommandos ohne das Flag werden sofort abgearbeitet. Dabei werden alle laufenden Übergänge sofort abgebrochen und die Warteschlange wird gelöscht.
+      </ul>
+    </li>
+    <li>event: 
+      <ul>
+        Beliebige Bezeichnung ([A-Za-z_0-9])
+        <p>
+        WifiLight erzeugt bei Verwendung dieses Flags im Verlauf weicher Übergange zu einer anderen Farbe Nachrichten (events) in der Form:
+        <p>
+        <code>WifiLight &ltNAME&gt programm: &ltEVENT&gt &ltXX&gt</code>.
+        <p>
+        &ltEVENT&gt entspricht dem Namen so wie im Flag angegeben.<br/>
+        &ltXX&gt ist der prozentuale Fortschritt des Übergangs.<br/>
+        <p>
+        Je nach Gesamtdauer des Übergangs werden die Werte von 0 bis 100 nicht komplett durchlaufen wobei jedoch für 0% und 100% immer ein event garantiert ist. Auf diese events kann dann innerhalb von notify oder DOIF reagiert werden um zum Beispiel:
+        <ul>
+          <li>die Lautstärke eines Radios anzupassen wenn eine LED morgens langsam hochgedimmt wird</li>
+          <li>ein Farbübergang kann in einem notify neu gestartet werden wenn er komplett ist (loop)</li>
+          <li>andere Leuchtmittel können mit erstellten Farbübergängen synchronisiert werden</li>
+        </ul>
+      </ul>
+    </li>
+  </ul>
+  <p><b><a name="WifiLight_Farbkalibrierung"></a>Farbkalibrierung</b></p>
+  WifiLight unterstützt zwei unterschiedliche Formen der Farbkalibrierungen:
+  <ul>
+    <p>
+    <b>Korrektur gesättigter Farben</b>
+    <p>
+    Hintergrund:
+    <p>
+    GELB, zum Beispiel, ist definiert als Mischung aus ROTEM und GRÜNEM Licht zu gleichen Teilen. 
+    Je nach verwendeter LED und Ansteuerung ist der GRÜNE Kanal nun möglicherweise viel leuchtstärker.
+    Wenn jetzt also die ROTE und GRÜNE LED jeweils voll angesteuert werden überwiegt GRÜN in dieser Mischung und das gewünschte GELB bekäme einen deutlichen Grünstich.
+    In diesem Beispiel würde jetzt für HSV 60,100,100 kein Gelb (entsprechend 60° im <a href="#WifiLight_Farbkreis">"Farbkreis"</a>) erzeugt. 
+    Stattdessen würde GRÜN mit GELBSTICH erzeugt das vielleicht einem geschätzten Farbwinkel von 80° entspricht.
+    Die erforderliche Korrektur für GELB würde also minus 20° betragen (60° SOLL - 80° IST = -20° Korrektur). 
+    GELB müsste als um -20° korrigiert werden. Mögliche Werte pro Korrektur-Punkt sind +/- 29°.
+    <p>
+    Vorgehen:
+    <p>
+    Die Korrektur der Vollfarben wird über das Attribut "colorCast" gesteuert. Dabei werden 6 (Komma getrennte) Werte im Bereich -29 bis 29 angegeben.
+    Diese Werte stehen entsprechen der Winkelkorrektur für ROT (0°), GELB (60°), GRÜN (120°), CYAN (180°), BLAU (240°) und MAGENTA (300°).
+    Zuerst sollte die Abweichung für 60°/180°/300° (die Mischfarben) so wie in obigem Beispiel ermittelt und im Attribut hinterlegt werden.
+    Im Anschluss sollten die Primärfarben (0°/120°/240°) so korrigiert werden das die weichen Übergänge zwischen benachbarten reinen Farben möglichst linear erscheinen.
+    Dieser Vorgang muss eventuell iterativ mehrfach wiederholt werden bis das Ergebniss stimmig ist. 
+    <p>
+    <b>Weißabgleich</b>
+    <p>
+    Hintergrund:
+    <p>
+    Einige Leuchtmittel erzeugen weißes Licht durch Mischung der RGB Kanäle (zum Beispiel LW12). 
+    Je nach Leuchtstärke der RGB Kanäle der verwendeten LED Streifen unterscheidet sich das Ergebnis und eine oder zwei Farben dominieren. 
+    Zusätzlich gibt es verschiedene Formen weißen Lichtes. Kaltes Licht hat einen höheren Blauanteil. 
+    Dagegen wird in Mitteleuropa für Leuchtmittel meist warm-weiß verwendet welches einen hohen ROT- und geringen BLAU Anteil hat.
+    <p>
+    WifiLight bietet die Möglichkeit bei RGB gemischtem Weiß die Zusammensetzung anzupassen. Die Anpassung erfolgt über das Attribut "whitePoint".
+    Dieses erwartet für jeden der drei RGB Kanäle einen Wert zwischen 0 und 1 (ein Komma wird als Punkt angegeben). Die drei Werte werden mit einem normalen Komma getrennt.
+    <p>
+    Vorgehen:
+    <p>
+    Eine Angabe von "1,1,1" setzt alle die drei Kanäle auf jeweils 100%. Angenommen der BLAU Anteil des weißen Lichtes soll nun verringert werden. 
+    Ein Wert von "1,1,0.5" setzt den dritten Kanal (BLAU) bei Weiß auf 0.5 entsprechend 50%. Vor einem Weißabgleich sollte die Korrektur der Vollfarben abgeschlossen sein.  
+  </ul>
+  <p><b>Attribute</b></p>
+  <ul>
+    <li>
+      <code>attr &ltname&gt <b>colorCast</b> &ltR,Y,G,C,B,M&gt</code>
+      <p>   
+      <a href="#WifiLight_Farbkalibrierung">Farbkalibrierung</a> der voll gesättigten Farben.
+      R(ed), Y(ellow), G(reen), C(yan), B(lue), M(agenta) im Bereich +/- 29
+    </li>
+    <li>
+      <code>attr &ltname&gt <b>defaultColor</b> &ltH,S,V&gt</code>
+      <p>   
+      HSV Angabe der Lichtfarbe die bei "on" gewählt wird. Default ist Weiß.
+    </li>
+    <li>
+      <code>attr &ltname&gt <b>defaultRamp</b> &lt0 bis X&gt</code>
+      <p>   
+      Zeit in Sekunden. Wenn dieses Attribut gesetzt ist wird implizit immer ein weicher Übergang erzeugt wenn keine Ramp im set angegeben ist. 
+    </li>
+    <li>
+      <code>attr &ltname&gt <b>dimStep</b> &lt0 bis 100&gt</code>
+      <p>   
+      Wert um den die Helligkeit bei dimUp und dimDown verändert wird. Default 7.
+    </li>
+    <li>
+      <code>attr &ltname&gt <b>gamma</b> &ltX.X&gt</code>
+      <p>   
+      Das menschliche Auge nimmt Helligkeitsänderungen sehr unterschiedlich wahr (logarithmisch). 
+      Bei geringer Ausgangshelligkeit wird schon eine kleine Helligkeitsänderung als sehr stark empfunden und auf der anderen Seite sind bei großer Helligkeit starke Änderungen notwendig.
+      Daher ist eine logarithmische Korrektur des Helligkeitsanstiegs der Leuchtmittel erforderlich damit der Anstieg als gleichmäßig empfunden wird.
+      Einige controller führen diese Korrektur intern durch. In anderen Fällen ist es notwendig diese Korrektur im Modul zu hinterlegen.
+      Ein gamma Wert von 1.0 (default) führt zu einer linearen Ausgabe der Werte. Werte kleiner als 1.0 führen zu einer logarithmischem Korrektur.
+    </li>
+    <li>
+      <code>attr &ltname&gt <b>whitePoint</b> &ltR,G,B&gt</code>
+      <p>   
+      <a href="#WifiLight_Farbkalibrierung">Farbkalibrierung</a> für RGB gemischtes weißes Licht.
+    </li>
+    <li>
+      <code>attr &ltname&gt <b><a href="#readingFnAttributes">readingFnAttributes</a></b></code>
+    </li>
+  </ul>
+  <p><b>Farbiges Icon für FhemWeb</b>
+  <ul>
+    <p>
+    Um ein farbiges Icon für <a href="#FHEMWEB">FhemWeb</a> zu aktivieren muss das folgende Attribut gesetzt sein:
+    <p>
+    <li>
+      <code>attr &ltname&gt <b>devStateIcon</b> {Color_devStateIcon(ReadingsVal($name,"RGB","000000"))}</code>
+    </li>
+  </ul>
+  <p><b>Colorpicker für FhemWeb</b>
+  <ul>
+    <p>
+    Um den Color-Picker für <a href="#FHEMWEB">FhemWeb</a> zu aktivieren müssen folgende Attribute gesetzt werden:
+    <p>
+    <li>
+      <code>attr &ltname&gt <b>webCmd</b> RGB</code>
+    </li>
+    <li>
+      <code>attr &ltname&gt <b>widgetOverride</b> RGB:colorpicker,RGB</code>
+    </li>
+  </ul>
 </ul>
+
 =end html_DE
